@@ -2,6 +2,7 @@
 SICP exercises by Rust &amp; utilities for SICP in Rust
 
 # 施工中
+# 这个主要是依赖lib,完整可运行的习题解会在examples中
 # 已有rust实现pair,list,head,tail,支持动态类型,可像sicp js版本一样coding
 
 # 已有习题解,整理中
