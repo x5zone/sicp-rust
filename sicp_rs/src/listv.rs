@@ -35,7 +35,7 @@ macro_rules! is_type {
 ///
 /// 此 trait 提供了类型检查、相等性判断和字符串转换等功能，
 /// 支持将任意类型封装为 `ListV` 动态类型。
-pub trait ListV: Any {
+pub trait ListV: Any+Debug+Display {
     /// Returns a reference to the underlying `Any` type.
     fn as_any(&self) -> &dyn Any;
 
@@ -54,9 +54,6 @@ pub trait ListV: Any {
     fn sameness(&self, other: &dyn ListV) -> bool {
         ptr::eq(self.as_any() as *const _, other.as_any() as *const _)
     }
-
-    /// Converts the object to a string representation.
-    fn to_string(&self) -> String;
 }
 impl<T> ListV for T
 where
@@ -82,9 +79,6 @@ where
     }
     fn is_float(&self) -> bool {
         is_type!(self, f32) || is_type!(self, f64)
-    }
-    fn to_string(&self) -> String {
-        format!("{}", self)
     }
 }
 
