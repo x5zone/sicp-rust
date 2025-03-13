@@ -1,34 +1,68 @@
 // src/list/mod.rs
 //! # List Implementation
 //!
-//! This module defines a `List` type that supports recursive and nested list structures.
+//! This module defines a `List` type that supports recursive and nested list structures,
+//! inspired by the Lisp-style linked lists commonly seen in functional programming.
 //! It provides various utility methods for manipulating lists, such as mapping, filtering,
 //! folding, and more. Additionally, it includes macros for creating lists and wrapping values.
 //!
 //! ## Features
 //! - Nested list structures (`List::Cons`).
 //! - Immutable value wrapping (`List::V`).
-//! - Utility methods for list manipulation.
-//! - Macros for convenient list creation.
+//! - Utility methods for list manipulation, such as `map`, `filter`, `fold_left`, and more.
+//! - Support for comparing lists and values (`PartialEq` and `PartialOrd`).
 //!
 //! ## Examples
+//!
+//! ### Creating a List
 //! ```rust
-//! use sicp_rs::{list, v};
+//! use sicp_rs::list;
 //! use sicp_rs::list_impl::List;
+//! use sicp_rs::list_impl::Wrap;
 //!
 //! // Create a nested list
-//! let nested_list = list![v![1, 2, 3], v![4, 5]];
-//! println!("{}", nested_list); // Output: ((V(1), (V(2), (V(3), Nil))), (V(4), (V(5), Nil)))
+//! let nested_list = list![1, "hello", list![2, 3]];
+//! println!("{}", nested_list); // Output: (1, ("hello", ((2, (3, Nil)), Nil)))
 //!
 //! // Manipulate the list
 //! let reversed = nested_list.deep_reverse();
-//! println!("{}", reversed); // Output: ((V(5), (V(4), Nil)), ((V(3), (V(2), (V(1), Nil))), Nil))
+//! println!("{}", reversed); // Output: (((3, (2, Nil)), Nil), ("hello", (1, Nil)))
 //! ```
+//!
+//! ### Working with Values
+//! ```rust
+//! use sicp_rs::list;
+//! use sicp_rs::list_impl::List;
+//! use sicp_rs::list_impl::Wrap;
+//!
+//! let list = list![1, 2, 3];
+//! assert_eq!(list.length(), 3);
+//! let mapped = list.map(|x| (x.try_as_basis_value::<i32>().unwrap() * 2).wrap());
+//! assert_eq!(mapped.to_string(), "(2, (4, (6, Nil)))");
+//! ```
+//!
+//! ### Filtering and Folding
+//! ```rust
+//! use sicp_rs::list;
+//! use sicp_rs::list_impl::List;
+//! use sicp_rs::list_impl::Wrap;
+//!
+//! let list = list![1, 2, 3, 4, 5_i32];
+//!
+//! // Filter even numbers
+//! let filtered = list.filter(|x| x.try_as_basis_value::<i32>().unwrap() % 2 == 0);
+//! assert_eq!(filtered.to_string(), "(2, (4, Nil))");
+//!
+//! // Sum up all elements
+//! let sum = list.fold_left(|acc, x| acc + x.try_as_basis_value::<i32>().unwrap(), 0);
+//! assert_eq!(sum, 15);
+//! ```
+
+use crate::listv::ListV;
+use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
-use std::any::TypeId;
-use crate::listv::ListV;
 // UnsafeCell
 // 预备以后的扩展,例如" 1. Sicp ch3.5中涉及并发, 可修改为 Rc->Arc; 2. 若因为借用检查导致panic RefCell->RwLock
 // #[cfg(feature = "single_threaded")]
@@ -44,6 +78,17 @@ use crate::listv::ListV;
 /// 使用 `Rc<RefCell<List>>` 封装的共享引用。
 /// 在单线程环境下使用 `Rc`，在多线程环境下可扩展为 `Arc`。
 type SharedList = Rc<RefCell<List>>;
+/// #[derive(Debug)]
+/// 当前 Rust 版本不支持 `where T: !Trait` 的负约束，
+/// 因此依赖 `Debug` trait 来区分 `ListV` 和 `List`。
+/// 
+/// 注意：
+/// - `ListV` 类型必须实现 `Debug` trait；
+/// - `List` 类型禁止实现 `Debug` trait，否则会导致实现冲突。
+/// 
+/// 未来可以在 Rust 支持负约束或特化（specialization）后，移除此限制。
+/// `assert_eq!` 宏依赖 `Debug` trait。当前实现中，`assert_eq!` 宏无法直接使用，因此需要使用 `assert!` 或其他替代方法。
+/// 
 /// Enum representing a recursive list structure.
 /// 定义递归链表结构的枚举。
 pub enum List {
@@ -65,15 +110,6 @@ impl Clone for List {
 impl List {
     /// Extract an immutable reference from a `SharedList`.
     /// 从 `SharedList` 中提取不可变引用。
-    /// 
-    /// # Examples
-    /// ```rust
-    /// use sicp_rs::list;
-    /// use sicp_rs::list_impl::List;
-    /// let l = list![List::Nil];
-    /// let head = List::extract_clone(&l.head());
-    /// assert_eq!(head.is_empty(), true);
-    /// ```
     pub fn extract_clone(sl: &SharedList) -> List {
         (*sl.borrow()).clone()
     }
@@ -81,7 +117,7 @@ impl List {
     /// Modify the content of a `SharedList`.
     /// 修改 `SharedList` 的内容。
     fn replace_list(old: &SharedList, new_list: List) {
-        *old.borrow_mut() = new_list; 
+        *old.borrow_mut() = new_list;
     }
     /// Create a pair of two lists.
     /// 创建两个链表的配对。
@@ -161,13 +197,6 @@ impl List {
     }
     /// Wrap a value as `List::V`.
     /// 将基础值封装为 `List::V`。
-    ///
-    /// # Examples
-    /// ```rust
-    /// use sicp_rs::{v, list};
-    /// let value = v![42];
-    /// assert!(value.is_value());
-    /// ```
     pub fn wrap_as_list_value<T: ListV>(v: T) -> List {
         List::V(Rc::new(v))
     }
@@ -179,13 +208,20 @@ impl List {
         }
     }
 
-    pub fn try_as_basis_value<T: Clone + 'static>(&self) -> Result<T, &'static str> {
+    pub fn try_as_basis_value<T: Clone + std::fmt::Debug + 'static>(
+        &self,
+    ) -> Result<&T, &'static str> {
         match self {
-            List::V(v) => v
-                .as_any()
-                .downcast_ref::<T>()
-                .map(|value| value.clone())
-                .ok_or("Type mismatch"),
+            List::V(v) => {
+                // 必须首先as_ref()从Rc中解出dyn ListV,才是正确的Any类型,从而正确解出类型T的值
+                let any = v.as_ref().as_any();
+
+                if let Some(value) = any.downcast_ref::<T>() {
+                    Ok(value)
+                } else {
+                    Err("Type mismatch")
+                }
+            }
             List::Nil => Err("Cannot call try_as_basis_value on List::Nil"),
             List::Cons(_, _) => Err("Cannot call try_as_basis_value on List::Cons"),
         }
@@ -204,13 +240,16 @@ impl List {
     /// ```rust
     /// use sicp_rs::list_impl::List;
     /// use sicp_rs::list;
+    /// use crate::sicp_rs::list_impl::Wrap;
     /// let l = list![List::Nil, List::Nil];
     /// assert_eq!(l.length(), 2);
     /// ```
     pub fn from_slice(items: &[List]) -> Self {
         items
             .iter()
-            .rfold(List::Nil, |acc, item| List::pair(item.clone(), acc))
+            .rfold(List::Nil, |acc, item| {
+                println!("from_slice: {} {}", item, acc);
+                List::pair(item.clone(), acc)})
     }
 
     // 传入Iterator<Item = List<T>>类型,以确保既可以传入[V(1),V(2)],也可以传入[List1,List2]
@@ -411,7 +450,7 @@ impl fmt::Display for List {
                 )
             }
             List::V(t) => {
-                write!(f, "{}", t)
+                write!(f, "{:?}", t)
             }
 
             List::Nil => write!(f, "Nil"),
@@ -424,29 +463,39 @@ impl PartialEq for List {
         match (self, other) {
             (List::Nil, List::Nil) => true,
             (List::Cons(x1, x2), List::Cons(y1, y2)) => x1 == y1 && x2 == y2,
-            (List::V(x1), List::V(y1)) => x1.as_ref() == y1.as_ref(),
+            (List::V(x1), List::V(y1)) => {
+                x1.as_ref() == y1.as_ref()},
             _ => false,
         }
     }
 }
-/// Macro for wrapping values as `List::V`.
-/// 用于将值封装为 `List::V` 的宏。
-#[macro_export]
-macro_rules! v {
-    // 单个值直接返回 `List::value`
-    ($val:expr) => {
-        List::wrap_as_list_value($val)
-    };
-    // 多个值展开为多个 `List::V`，以逗号分隔
-    ($($val:expr),+ $(,)?) => {
-        $(List::wrap_as_list_value($val)),*
-    };
+pub trait Wrap {
+    fn wrap(self) -> List;
 }
+impl<T> Wrap for T
+where
+    T: ListV + 'static,
+{
+    fn wrap(self) -> List {
+        List::wrap_as_list_value(self)
+    }
+}
+impl Wrap for List {
+    fn wrap(self) -> List {
+        self
+    }
+}
+
 /// Macro for creating a list from values.
 /// 用于从多个值创建链表的宏。
 #[macro_export]
 macro_rules! list {
-    ($($val:expr),* $(,)?) => {
-        List::from_slice(&[ $($val),* ])
+    () => {
+        $crate::list_impl::List::Nil
+    };
+    ($($val:expr),+ $(,)?) => {
+        $crate::list_impl::List::from_slice(&[
+            $($val.wrap()),*
+        ])
     };
 }

@@ -1,10 +1,5 @@
 // src/listv.rs:
-use std::{
-    any::Any,
-    error::Error,
-    fmt::{Debug, Display},
-    io, ptr,
-};
+use std::{any::Any, error::Error, fmt::Debug, io, ptr};
 
 /// A macro to check if a `ListV` object is of a specific type.
 /// 判断 `ListV` 是否为某种具体类型的宏。
@@ -35,7 +30,7 @@ macro_rules! is_type {
 ///
 /// 此 trait 提供了类型检查、相等性判断和字符串转换等功能，
 /// 支持将任意类型封装为 `ListV` 动态类型。
-pub trait ListV: Any+Debug+Display {
+pub trait ListV: Any + Debug {
     /// Returns a reference to the underlying `Any` type.
     fn as_any(&self) -> &dyn Any;
 
@@ -54,10 +49,13 @@ pub trait ListV: Any+Debug+Display {
     fn sameness(&self, other: &dyn ListV) -> bool {
         ptr::eq(self.as_any() as *const _, other.as_any() as *const _)
     }
+    fn to_string(&self) -> String {
+        format!("{:?}", self)
+    }
 }
 impl<T> ListV for T
 where
-    T: Any + Debug + Display + Clone + 'static,
+    T: Any + Debug + Clone + 'static,
 {
     fn as_any(&self) -> &dyn Any {
         self

@@ -1,4 +1,4 @@
-use listv::{ListV, is_type};
+use sicp_rs::listv::ListV;
 
 #[test]
 fn test_listv_is_string() {
@@ -18,11 +18,11 @@ fn test_listv_is_integer() {
 fn test_listv_partial_eq() {
     let a: Box<dyn ListV> = Box::new(42);
     let b: Box<dyn ListV> = Box::new(42);
-    assert_eq!(a, b);
+    assert_eq!(&a, &b);
 
     let c: Box<dyn ListV> = Box::new(3.14);
     let d: Box<dyn ListV> = Box::new(3.14);
-    assert_eq!(c, d);
+    assert_eq!(&c, &d);
 }
 
 #[test]
