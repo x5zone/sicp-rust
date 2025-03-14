@@ -62,15 +62,12 @@ fn assoc(key: &List, records: &List) -> Option<List> {
         key.is_value() && key.get_basis_value().is_string(),
         "assoc key must be string"
     );
-    if !records.is_empty() {
-        println!("records head: {}", records.head());
-        println!("records headhead: {}", records.head().head());
-    }
+
     if records.is_empty() {
         None
     } else if *key == records.head().head() {
         // List::V(_) == List::V(_)
-        Some(records.clone())
+        Some(records.head().clone())
     } else {
         assoc(key, &records.tail())
     }
@@ -115,12 +112,7 @@ impl table_2d {
     }
     fn lookup_2d(&self, key1: &List, key2: &List) -> Option<List> {
         let subtable = assoc(&key1, &self.local_table.tail());
-        println!(
-            "key1{},key2{},subtable{}",
-            key1,
-            key2,
-            subtable.clone().unwrap()
-        );
+
         if let Some(subtable) = subtable {
             let record = assoc(&key2, &subtable.tail());
             if let Some(record) = record {

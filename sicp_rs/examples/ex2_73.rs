@@ -64,9 +64,9 @@ fn make_product<T: Num + Wrap + Clone + std::fmt::Debug + 'static>(m1: List, m2:
 fn main() {
     let mut optable = table_2d::make_table_2d();
     optable.put("deriv".wrap(), "+".wrap(), 3.wrap());
-    //optable.put("deriv".wrap(), "+".wrap(), 3.wrap());
-    //optable.put("deriv".wrap(), "*".wrap(), 4.wrap());
-    println!("{}", optable);
-    println!("{}", optable.get(&"deriv".wrap(), &"+".wrap()).unwrap());
+    optable.put("deriv".wrap(), "+".wrap(), 3.wrap());
+    optable.put("deriv".wrap(), "*".wrap(), 4.wrap());
+    println!("-------{}", optable);
+    println!("-------{}", optable.get(&"deriv".wrap(), &"+".wrap()).unwrap());
 }
 

@@ -254,10 +254,9 @@ impl List {
     /// assert_eq!(l.length(), 2);
     /// ```
     pub fn from_slice(items: &[List]) -> Self {
-        items.iter().rfold(List::Nil, |acc, item| {
-            println!("from_slice: {} {}", item, acc);
-            List::pair(item.clone(), acc)
-        })
+        items
+            .iter()
+            .rfold(List::Nil, |acc, item| List::pair(item.clone(), acc))
     }
 
     // 传入Iterator<Item = List<T>>类型,以确保既可以传入[V(1),V(2)],也可以传入[List1,List2]
