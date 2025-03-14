@@ -57,7 +57,6 @@ pub trait ListV: Any + Debug {
         format!("{:?}", self)
     }
     fn to_listv(self) -> List;
-    
 }
 impl<T> ListV for T
 where
@@ -84,8 +83,7 @@ where
     fn is_float(&self) -> bool {
         is_type!(self, f32) || is_type!(self, f64)
     }
-    fn to_listv(self) -> List
-    {
+    fn to_listv(self) -> List {
         List::wrap_as_list_value(self)
     }
 }

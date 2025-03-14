@@ -1,6 +1,6 @@
-use crate::prelude::*;
 use crate::list_impl::panic_with_location;
-use std::fmt;
+use crate::prelude::*;
+use std::rc::Rc;
 
 /// 3.3.2 队列的表示
 pub fn make_queue() -> List {
@@ -55,7 +55,7 @@ pub fn front_queue(queue: &List) -> List {
 
 fn assoc(key: &List, records: &List) -> Option<List> {
     assert!(
-        key.is_value() && key.get_basis_value().is_string(),
+        key.is_value() && key.is_string_value(),
         "assoc key must be string"
     );
 
@@ -76,14 +76,14 @@ pub fn lookup(key: &List, table: &List) -> Option<List> {
         None
     }
 }
-pub fn insert(key: &List, value: List, table: &List) -> String {
+pub fn insert(key: &List, value: List, table: &List) -> Option<List> {
     let record = assoc(&key, &table.tail());
     if let Some(record) = record {
         record.set_tail(value);
     } else {
         table.set_tail(pair!(pair!(key.clone(), value), table.tail()))
     }
-    "ok".to_string()
+    Some("ok".to_string().to_listv())
 }
 pub fn make_table() -> List {
     list!["*table*"]
@@ -95,58 +95,84 @@ mod test_table_1d {
     #[test]
     fn test_insert() {
         let t = make_table();
-        println!("{}",t);
+        println!("{}", t);
     }
 }
-pub struct Table2d {
-    local_table: List,
-}
-impl Table2d {
-    pub fn make_table_2d() -> Self {
-        Self {
-            local_table: list!["*table*"],
-        }
-    }
-    fn lookup_2d(&self, key1: &List, key2: &List) -> Option<List> {
-        let subtable = assoc(&key1, &self.local_table.tail());
 
-        if let Some(subtable) = subtable {
-            let record = assoc(&key2, &subtable.tail());
-            if let Some(record) = record {
-                Some(record.tail())
-            } else {
-                None
-            }
+pub fn lookup_2d(key1: &List, key2: &List, local_table: &List) -> Option<List> {
+    let subtable = assoc(&key1, &local_table.tail());
+
+    if let Some(subtable) = subtable {
+        let record = assoc(&key2, &subtable.tail());
+        if let Some(record) = record {
+            Some(record.tail())
         } else {
             None
         }
-    }
-    fn insert_2d(&mut self, key1: List, key2: List, value: List) -> String {
-        let subtable = assoc(&key1, &self.local_table.tail());
-        if let Some(subtable) = subtable {
-            let record = assoc(&key2, &subtable.tail());
-            if let Some(record) = record {
-                record.set_tail(value);
-            } else {
-                subtable.set_tail(pair!(pair!(key2, value), subtable.tail()));
-            }
-        } else {
-            self.local_table.set_tail(pair!(
-                list!(key1, pair!(key2, value)),
-                self.local_table.tail()
-            ));
-        }
-        "ok".to_string()
-    }
-    pub fn get(&self, key1: &List, key2: &List) -> Option<List> {
-        self.lookup_2d(key1, key2)
-    }
-    pub fn put(&mut self, key1: List, key2: List, value: List) -> String {
-        self.insert_2d(key1, key2, value)
+    } else {
+        None
     }
 }
-impl fmt::Display for Table2d {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.local_table)
+pub fn insert_2d(key1: &List, key2: &List, value: List, local_table: List) -> Option<List> {
+    let subtable = assoc(&key1, &local_table.tail());
+    if let Some(subtable) = subtable {
+        let record = assoc(&key2, &subtable.tail());
+        if let Some(record) = record {
+            record.set_tail(value);
+        } else {
+            subtable.set_tail(pair!(pair!(key2.clone(), value), subtable.tail()));
+        }
+    } else {
+        local_table.set_tail(pair!(
+            list!(key1.clone(), pair!(key2.clone(), value)),
+            local_table.tail()
+        ));
+    }
+    Some("ok".to_string().to_listv())
+}
+
+pub fn make_table_2d() -> Rc<dyn Fn(&str) -> ClosureWrapper> {
+    let local_table = Rc::new(list!["*table*"]);
+    let local2 = local_table.clone();
+    // 必须将闭包显式写在此处,以方便编译器推断生命周期;若这部分代码直接写在下面的闭包中,则编译器无法推断生命周期,编译失败.
+    let lookup = move |args: &List| {
+        let a1 = args.head();
+        let a2 = args.tail().head();
+        let lt = local_table.clone();
+
+        lookup_2d(&a1, &a2, &lt)
+    };
+    let insert = move |args: &List| {
+        let a1 = args.head();
+        let a2 = args.tail().head();
+        let a3 = args.tail().tail().head();
+        let lt = local2.clone();
+
+        insert_2d(&a1, &a2, a3, (*lt).clone())
+    };
+    Rc::new(move |m: &str| {
+        if m == "lookup" {
+            ClosureWrapper::new(lookup.clone())
+        } else if m == "insert" {
+            ClosureWrapper::new(insert.clone())
+        } else {
+            panic!("unknown message")
+        }
+    })
+}
+#[cfg(test)]
+mod test_table_2d {
+    use super::*;
+    #[test]
+    fn test_insert() {
+        let optable = make_table_2d();
+        let get = |args: List| optable("lookup").call(&args);
+        let put = |args: List| optable("insert").call(&args);
+        put(list!["deriv", "+", 3]);
+        put(list!["deriv", "+", 3]);
+        put(list!["deriv", "*", 4]);
+
+        assert_eq!(get(list!["deriv", "+"]).unwrap(), 3.to_listv());
+        assert_eq!(get(list!["deriv", "*"]).unwrap(), 4.to_listv());
     }
 }

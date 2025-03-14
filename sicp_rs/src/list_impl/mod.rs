@@ -203,7 +203,18 @@ impl List {
             _ => unreachable_with_location("Only List::V(_) can call get_basis_value", &self),
         }
     }
-
+    pub fn is_number_value(&self) -> bool {
+        self.is_value() && self.get_basis_value().as_ref().is_number()
+    }
+    pub fn is_string_value(&self) -> bool {
+        self.is_value() && self.get_basis_value().as_ref().is_string()
+    }
+    pub fn is_float_value(&self) -> bool {
+        self.is_value() && self.get_basis_value().as_ref().is_float()
+    }
+    pub fn is_integer_value(&self) -> bool {
+        self.is_value() && self.get_basis_value().as_ref().is_integer()
+    }
     pub fn try_as_basis_value<T: Clone + std::fmt::Debug + 'static>(
         &self,
     ) -> Result<&T, &'static str> {
@@ -499,4 +510,42 @@ macro_rules! pair {
     ($a:expr, $b:expr) => {
         $crate::list_impl::List::pair($a.to_listv(), $b.to_listv())
     };
+}
+
+/// 用于包装闭包类型，实现 Debug+Clone trait & 类型擦除，从而支持List存储与取出并解析值
+pub struct ClosureWrapper {
+    func: Rc<dyn Fn(&List) -> Option<List>>,
+}
+
+impl ClosureWrapper {
+    // 创建一个新的 ClosureWrapper
+    pub fn new<F>(func: F) -> Self
+    where
+        F: Fn(&List) -> Option<List> + 'static,
+    {
+        ClosureWrapper {
+            func: Rc::new(func),
+        }
+    }
+
+    // 调用存储的闭包
+    pub fn call(&self, args: &List) -> Option<List> {
+        (self.func)(args)
+    }
+}
+
+// 实现 Clone
+impl Clone for ClosureWrapper {
+    fn clone(&self) -> Self {
+        ClosureWrapper {
+            func: Rc::clone(&self.func),
+        }
+    }
+}
+
+// 实现 Debug
+impl fmt::Debug for ClosureWrapper {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "A closure wrapped in ClosureWrapper")
+    }
 }
