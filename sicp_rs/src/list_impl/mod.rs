@@ -62,7 +62,7 @@ use crate::listv::ListV;
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 // UnsafeCell
 // 预备以后的扩展,例如" 1. Sicp ch3.5中涉及并发, 可修改为 Rc->Arc; 2. 若因为借用检查导致panic RefCell->RwLock
 // #[cfg(feature = "single_threaded")]
@@ -78,17 +78,18 @@ use std::rc::Rc;
 /// 使用 `Rc<RefCell<List>>` 封装的共享引用。
 /// 在单线程环境下使用 `Rc`，在多线程环境下可扩展为 `Arc`。
 type SharedList = Rc<RefCell<List>>;
+
 /// #[derive(Debug)]
 /// 当前 Rust 版本不支持 `where T: !Trait` 的负约束，
 /// 因此依赖 `Debug` trait 来区分 `ListV` 和 `List`。
-/// 
+///
 /// 注意：
 /// - `ListV` 类型必须实现 `Debug` trait；
 /// - `List` 类型禁止实现 `Debug` trait，否则会导致实现冲突。
-/// 
+///
 /// 未来可以在 Rust 支持负约束或特化（specialization）后，移除此限制。
 /// `assert_eq!` 宏依赖 `Debug` trait。当前实现中，`assert_eq!` 宏无法直接使用，因此需要使用 `assert!` 或其他替代方法。
-/// 
+///
 /// Enum representing a recursive list structure.
 /// 定义递归链表结构的枚举。
 pub enum List {
@@ -107,6 +108,7 @@ impl Clone for List {
         }
     }
 }
+
 impl List {
     /// Extract an immutable reference from a `SharedList`.
     /// 从 `SharedList` 中提取不可变引用。
@@ -195,6 +197,13 @@ impl List {
             _ => unreachable_with_location("Only list can call set_tail", &self),
         }
     }
+    pub fn last_pair(&self) -> List {
+        if self.tail().is_empty() {
+            self.clone()
+        } else {
+            self.tail().last_pair()
+        }
+    }
     /// Wrap a value as `List::V`.
     /// 将基础值封装为 `List::V`。
     pub fn wrap_as_list_value<T: ListV>(v: T) -> List {
@@ -245,11 +254,10 @@ impl List {
     /// assert_eq!(l.length(), 2);
     /// ```
     pub fn from_slice(items: &[List]) -> Self {
-        items
-            .iter()
-            .rfold(List::Nil, |acc, item| {
-                println!("from_slice: {} {}", item, acc);
-                List::pair(item.clone(), acc)})
+        items.iter().rfold(List::Nil, |acc, item| {
+            println!("from_slice: {} {}", item, acc);
+            List::pair(item.clone(), acc)
+        })
     }
 
     // 传入Iterator<Item = List<T>>类型,以确保既可以传入[V(1),V(2)],也可以传入[List1,List2]
@@ -273,6 +281,11 @@ impl List {
                 Self::pair((*self).clone(), Self::Nil).append(other)
             }
         }
+    }
+    pub fn append_mutator(&self, y: List) -> List {
+        assert!(!self.is_empty(), "append_mutator cannot work on empty pair");
+        self.last_pair().set_tail(y);
+        self.clone()
     }
     pub fn map<F>(&self, fun: F) -> List
     where
@@ -428,7 +441,7 @@ impl List {
 }
 
 #[inline(always)]
-fn unreachable_with_location(message: &str, self_repr: &impl std::fmt::Display) -> ! {
+pub fn unreachable_with_location(message: &str, self_repr: &impl std::fmt::Display) -> ! {
     unreachable!(
         "{}, Found {}. Called from {}:{}",
         message,
@@ -437,7 +450,19 @@ fn unreachable_with_location(message: &str, self_repr: &impl std::fmt::Display) 
         std::panic::Location::caller().line()
     );
 }
-
+#[inline(always)]
+pub fn panic_with_location(message: &str, self_repr: &impl std::fmt::Display) -> ! {
+    panic!(
+        "{}, Found {}. Called from {}:{}",
+        message,
+        self_repr,
+        std::panic::Location::caller().file(),
+        std::panic::Location::caller().line()
+    );
+}
+pub fn apply_in_underlying_rust(prim: impl Fn(&List) -> List, arglist: &List) -> List {
+    prim(arglist)
+}
 impl fmt::Display for List {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -463,8 +488,7 @@ impl PartialEq for List {
         match (self, other) {
             (List::Nil, List::Nil) => true,
             (List::Cons(x1, x2), List::Cons(y1, y2)) => x1 == y1 && x2 == y2,
-            (List::V(x1), List::V(y1)) => {
-                x1.as_ref() == y1.as_ref()},
+            (List::V(x1), List::V(y1)) => x1.as_ref() == y1.as_ref(),
             _ => false,
         }
     }
@@ -497,5 +521,14 @@ macro_rules! list {
         $crate::list_impl::List::from_slice(&[
             $($val.wrap()),*
         ])
+    };
+}
+
+/// Macro for creating a pair of two lists.
+/// 用于创建两个链表的配对。
+#[macro_export]
+macro_rules! pair {
+    ($a:expr, $b:expr) => {
+        $crate::list_impl::List::pair($a.wrap(), $b.wrap())
     };
 }

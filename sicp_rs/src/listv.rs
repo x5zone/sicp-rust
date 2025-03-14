@@ -43,6 +43,9 @@ pub trait ListV: Any + Debug {
     /// Checks if the object is a floating-point type (`f32` or `f64`).
     fn is_float(&self) -> bool;
 
+    fn is_number(&self) -> bool {
+        self.is_integer() || self.is_float()
+    }
     /// Determines if the object is the same instance as another `ListV` object.
     /// This is based on pointer equality, inspired by the SICP concept of sameness.
     /// 该方法基于指针比较，源于 SICP 中的“同一性”概念。

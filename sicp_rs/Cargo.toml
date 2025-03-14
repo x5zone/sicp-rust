@@ -8,3 +8,4 @@ edition = "2024"
 #multi_threaded = []
 
 [dependencies]
+num = "0.4.3"
