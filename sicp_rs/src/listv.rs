@@ -1,14 +1,15 @@
 // src/listv.rs:
 use std::{any::Any, error::Error, fmt::Debug, io, ptr};
 
+use crate::prelude::List;
+
 /// A macro to check if a `ListV` object is of a specific type.
 /// 判断 `ListV` 是否为某种具体类型的宏。
 ///
 /// # Examples
 ///
 /// ```
-/// use sicp_rs::is_type;
-/// use sicp_rs::listv::ListV;
+/// use sicp_rs::prelude::*;
 ///
 /// let value: Box<dyn ListV> = Box::new("hello".to_string());
 /// assert!(is_type!(value, String));
@@ -52,9 +53,11 @@ pub trait ListV: Any + Debug {
     fn sameness(&self, other: &dyn ListV) -> bool {
         ptr::eq(self.as_any() as *const _, other.as_any() as *const _)
     }
-    fn to_string(&self) -> String {
+    fn as_string(&self) -> String {
         format!("{:?}", self)
     }
+    fn to_listv(self) -> List;
+    
 }
 impl<T> ListV for T
 where
@@ -80,6 +83,10 @@ where
     }
     fn is_float(&self) -> bool {
         is_type!(self, f32) || is_type!(self, f64)
+    }
+    fn to_listv(self) -> List
+    {
+        List::wrap_as_list_value(self)
     }
 }
 
@@ -123,7 +130,7 @@ impl PartialEq for dyn ListV {
             } else {
                 false
             }
-        } else if self.type_id() == other.type_id() && self.to_string() == other.to_string() {
+        } else if self.type_id() == other.type_id() && self.as_string() == other.as_string() {
             // Non-primitive types: Compare by string representation.
             true
         } else {
@@ -149,9 +156,9 @@ impl PartialOrd for dyn ListV {
                 None
             }
         } else if self.is_string() && other.is_string() {
-            self.to_string().partial_cmp(&other.to_string())
+            self.as_string().partial_cmp(&other.as_string())
         } else if self.type_id() == other.type_id() {
-            self.to_string().partial_cmp(&other.to_string())
+            self.as_string().partial_cmp(&other.as_string())
         } else {
             None
         }

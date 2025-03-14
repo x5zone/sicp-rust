@@ -1,9 +1,4 @@
-use crate::list_impl::List;
-use crate::list_impl::Wrap;
-
-use crate::ch3::ch3_3::table_2d;
-use crate::{list, pair};
-use num::Num;
+use crate::prelude::*;
 
 /// 2.3.2 实例： 符号求导
 pub fn is_number(exp: &List) -> bool {

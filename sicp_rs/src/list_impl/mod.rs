@@ -16,9 +16,7 @@
 //!
 //! ### Creating a List
 //! ```rust
-//! use sicp_rs::list;
-//! use sicp_rs::list_impl::List;
-//! use sicp_rs::list_impl::Wrap;
+//! use sicp_rs::prelude::*;
 //!
 //! // Create a nested list
 //! let nested_list = list![1, "hello", list![2, 3]];
@@ -31,21 +29,17 @@
 //!
 //! ### Working with Values
 //! ```rust
-//! use sicp_rs::list;
-//! use sicp_rs::list_impl::List;
-//! use sicp_rs::list_impl::Wrap;
+//! use sicp_rs::prelude::*;
 //!
 //! let list = list![1, 2, 3];
 //! assert_eq!(list.length(), 3);
-//! let mapped = list.map(|x| (x.try_as_basis_value::<i32>().unwrap() * 2).wrap());
+//! let mapped = list.map(|x| (x.try_as_basis_value::<i32>().unwrap() * 2).to_listv());
 //! assert_eq!(mapped.to_string(), "(2, (4, (6, Nil)))");
 //! ```
 //!
 //! ### Filtering and Folding
 //! ```rust
-//! use sicp_rs::list;
-//! use sicp_rs::list_impl::List;
-//! use sicp_rs::list_impl::Wrap;
+//! use sicp_rs::prelude::*;
 //!
 //! let list = list![1, 2, 3, 4, 5_i32];
 //!
@@ -58,11 +52,11 @@
 //! assert_eq!(sum, 15);
 //! ```
 
-use crate::listv::ListV;
+use crate::prelude::ListV;
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 // UnsafeCell
 // 预备以后的扩展,例如" 1. Sicp ch3.5中涉及并发, 可修改为 Rc->Arc; 2. 若因为借用检查导致panic RefCell->RwLock
 // #[cfg(feature = "single_threaded")]
@@ -79,19 +73,9 @@ use std::rc::{Rc, Weak};
 /// 在单线程环境下使用 `Rc`，在多线程环境下可扩展为 `Arc`。
 type SharedList = Rc<RefCell<List>>;
 
-/// #[derive(Debug)]
-/// 当前 Rust 版本不支持 `where T: !Trait` 的负约束，
-/// 因此依赖 `Debug` trait 来区分 `ListV` 和 `List`。
-///
-/// 注意：
-/// - `ListV` 类型必须实现 `Debug` trait；
-/// - `List` 类型禁止实现 `Debug` trait，否则会导致实现冲突。
-///
-/// 未来可以在 Rust 支持负约束或特化（specialization）后，移除此限制。
-/// `assert_eq!` 宏依赖 `Debug` trait。当前实现中，`assert_eq!` 宏无法直接使用，因此需要使用 `assert!` 或其他替代方法。
-///
 /// Enum representing a recursive list structure.
 /// 定义递归链表结构的枚举。
+#[derive(Debug)]
 pub enum List {
     Cons(SharedList, SharedList),
     // The value is treated as a List type, enabling the construction of nested lists (e.g., list(1, list(1, 2))).
@@ -126,7 +110,7 @@ impl List {
     ///
     /// # Examples
     /// ```rust
-    /// use sicp_rs::list_impl::List;
+    /// use sicp_rs::prelude::List;
     /// let pair = List::pair(List::Nil, List::Nil);
     /// assert!(pair.is_pair());
     /// ```
@@ -209,7 +193,10 @@ impl List {
     pub fn wrap_as_list_value<T: ListV>(v: T) -> List {
         List::V(Rc::new(v))
     }
-
+    /// 非基础值无需封装，直接返回自身
+    pub fn to_listv(self) -> List {
+        self
+    }
     pub fn get_basis_value(&self) -> Rc<dyn ListV> {
         match self {
             List::V(v) => v.clone(),
@@ -247,9 +234,7 @@ impl List {
     ///
     /// # Examples
     /// ```rust
-    /// use sicp_rs::list_impl::List;
-    /// use sicp_rs::list;
-    /// use crate::sicp_rs::list_impl::Wrap;
+    /// use sicp_rs::prelude::*;
     /// let l = list![List::Nil, List::Nil];
     /// assert_eq!(l.length(), 2);
     /// ```
@@ -492,22 +477,6 @@ impl PartialEq for List {
         }
     }
 }
-pub trait Wrap {
-    fn wrap(self) -> List;
-}
-impl<T> Wrap for T
-where
-    T: ListV + 'static,
-{
-    fn wrap(self) -> List {
-        List::wrap_as_list_value(self)
-    }
-}
-impl Wrap for List {
-    fn wrap(self) -> List {
-        self
-    }
-}
 
 /// Macro for creating a list from values.
 /// 用于从多个值创建链表的宏。
@@ -518,7 +487,7 @@ macro_rules! list {
     };
     ($($val:expr),+ $(,)?) => {
         $crate::list_impl::List::from_slice(&[
-            $($val.wrap()),*
+            $($val.to_listv()),*
         ])
     };
 }
@@ -528,6 +497,6 @@ macro_rules! list {
 #[macro_export]
 macro_rules! pair {
     ($a:expr, $b:expr) => {
-        $crate::list_impl::List::pair($a.wrap(), $b.wrap())
+        $crate::list_impl::List::pair($a.to_listv(), $b.to_listv())
     };
 }

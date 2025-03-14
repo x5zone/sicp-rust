@@ -1,19 +1,15 @@
-use std::fmt;
-use std::path::Display;
-
-use crate::list_impl::List;
-use crate::list_impl::Wrap;
+use crate::prelude::*;
 use crate::list_impl::panic_with_location;
-use crate::{list, pair};
+use std::fmt;
 
 /// 3.3.2 队列的表示
-fn make_queue() -> List {
+pub fn make_queue() -> List {
     pair!(List::Nil, List::Nil)
 }
-fn is_empty_queue(queue: &List) -> bool {
+pub fn is_empty_queue(queue: &List) -> bool {
     front_ptr(queue).is_empty()
 }
-fn insert_queue(queue: &List, item: List) -> List {
+pub fn insert_queue(queue: &List, item: List) -> List {
     let new_pair = pair!(item, List::Nil);
     if is_empty_queue(queue) {
         set_front_ptr(queue, new_pair.clone());
@@ -25,7 +21,7 @@ fn insert_queue(queue: &List, item: List) -> List {
         queue.clone()
     }
 }
-fn delete_queue(queue: &List) -> List {
+pub fn delete_queue(queue: &List) -> List {
     if is_empty_queue(queue) {
         panic_with_location("delete_queue called with an empty queue", queue)
     } else {
@@ -47,7 +43,7 @@ fn set_rear_ptr(queue: &List, item: List) -> List {
     queue.set_head(item);
     queue.clone()
 }
-fn front_queue(queue: &List) -> List {
+pub fn front_queue(queue: &List) -> List {
     if is_empty_queue(queue) {
         panic_with_location("front_queue called with an empty queue", queue)
     } else {
@@ -72,7 +68,7 @@ fn assoc(key: &List, records: &List) -> Option<List> {
         assoc(key, &records.tail())
     }
 }
-fn lookup(key: &List, table: &List) -> Option<List> {
+pub fn lookup(key: &List, table: &List) -> Option<List> {
     let record = assoc(key, &table.tail());
     if let Some(record) = record {
         Some(record.tail())
@@ -80,7 +76,7 @@ fn lookup(key: &List, table: &List) -> Option<List> {
         None
     }
 }
-fn insert(key: &List, value: List, table: &List) -> String {
+pub fn insert(key: &List, value: List, table: &List) -> String {
     let record = assoc(&key, &table.tail());
     if let Some(record) = record {
         record.set_tail(value);
@@ -89,7 +85,7 @@ fn insert(key: &List, value: List, table: &List) -> String {
     }
     "ok".to_string()
 }
-fn make_table() -> List {
+pub fn make_table() -> List {
     list!["*table*"]
 }
 #[cfg(test)]
@@ -99,12 +95,13 @@ mod test_table_1d {
     #[test]
     fn test_insert() {
         let t = make_table();
+        println!("{}",t);
     }
 }
-pub struct table_2d {
+pub struct Table2d {
     local_table: List,
 }
-impl table_2d {
+impl Table2d {
     pub fn make_table_2d() -> Self {
         Self {
             local_table: list!["*table*"],
@@ -148,7 +145,7 @@ impl table_2d {
         self.insert_2d(key1, key2, value)
     }
 }
-impl fmt::Display for table_2d {
+impl fmt::Display for Table2d {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.local_table)
     }

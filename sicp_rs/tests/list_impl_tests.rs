@@ -1,5 +1,4 @@
-use sicp_rs::list;
-use sicp_rs::list_impl::{List, Wrap};
+use sicp_rs::prelude::*;
 
 #[test]
 fn test_list_creation() {
@@ -98,7 +97,7 @@ fn test_nested_list_operations() {
     assert_eq!(nested.length(), 2);
     assert_eq!(nested.deep_length(), 4);
 
-    let mapped = nested.map(|x| x.map(|y| (y.try_as_basis_value::<i32>().unwrap() * 2).wrap()));
+    let mapped = nested.map(|x| x.map(|y| (y.try_as_basis_value::<i32>().unwrap() * 2).to_listv()));
     assert_eq!(
         mapped.to_string(),
         "((2, (4, Nil)), ((6, (8, Nil)), Nil))"

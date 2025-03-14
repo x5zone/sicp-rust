@@ -1,4 +1,4 @@
-use sicp_rs::listv::ListV;
+use sicp_rs::prelude::ListV;
 
 #[test]
 fn test_listv_is_string() {
