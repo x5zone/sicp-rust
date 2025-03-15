@@ -9,12 +9,18 @@ use sicp_rs::ch2::ch2_3::{
 use sicp_rs::ch3::ch3_3::make_table_2d;
 use sicp_rs::prelude::*;
 
+/// 获取表达式的运算符
 fn operator(exp: &List) -> List {
     exp.head()
 }
+
+/// 获取表达式的操作数
 fn operands(exp: &List) -> List {
+    //ch2.56节代码中直接对exp取操作数,故若使用历史代码并同时使用operands,会多取一次tail
     exp.tail()
 }
+
+/// 通用的求导函数，基于数据导向分派
 fn deriv<T: Num + Clone + std::fmt::Debug + 'static>(
     exp: &List,
     variable: &List,
@@ -29,14 +35,10 @@ fn deriv<T: Num + Clone + std::fmt::Debug + 'static>(
             T::zero().to_listv()
         }
     } else {
-        let op = optable(list!["deriv", operator(exp).clone()]);
-        if let Some(op) = op {
-            let op = op.try_as_basis_value::<ClosureWrapper>();
-            if let Ok(op) = op {
-                //let result = op.call(&list![operands(exp), variable.clone()]);
-                //ch2.56节代码中直接对exp取操作数,故若使用历史代码并同时使用operands,会多取一次tail
-                let result = op.call(&list![exp.clone(), variable.clone()]);
-                if let Some(result) = result {
+        // 从操作符表中获取对应的求导规则
+        if let Some(op) = optable(list!["deriv", operator(exp).clone()]) {
+            if let Ok(op) = op.try_as_basis_value::<ClosureWrapper>() {
+                if let Some(result) = op.call(&list![exp.clone(), variable.clone()]) {
                     return result;
                 }
             }
@@ -45,87 +47,125 @@ fn deriv<T: Num + Clone + std::fmt::Debug + 'static>(
     }
 }
 
-fn make_sum_of_deriv<T: Num + Clone + std::fmt::Debug + 'static>(
+/// 求和表达式的求导规则
+fn deriv_sum<T: Num + Clone + std::fmt::Debug + 'static>(
     exp: &List,
     variable: &List,
     optable: impl Fn(List) -> Option<List>,
 ) -> List {
-    let a1 = deriv::<T>(&addend(exp), variable, &optable);
-    let a2 = deriv::<T>(&augend(exp), variable, &optable);
-    make_sum::<T>(a1, a2)
+    make_sum::<T>(
+        deriv::<T>(&addend(exp), variable, &optable),
+        deriv::<T>(&augend(exp), variable, &optable),
+    )
 }
 
-fn make_product_of_deriv<T: Num + Clone + std::fmt::Debug + 'static>(
+/// 乘积表达式的求导规则
+fn deriv_product<T: Num + Clone + std::fmt::Debug + 'static>(
     exp: &List,
     variable: &List,
     optable: impl Fn(List) -> Option<List>,
 ) -> List {
-    let m1 = multiplier(exp);
-    let m2 = deriv::<T>(&multiplicand(exp), variable, &optable);
-    let a1 = make_product::<T>(m1.clone(), m2.clone());
-    let m1 = deriv::<T>(&multiplier(exp), variable, &optable);
-    let m2 = multiplicand(exp);
-    let a2 = make_product::<T>(m1.clone(), m2.clone());
-    make_sum::<T>(a1, a2)
+    make_sum::<T>(
+        make_product::<T>(
+            multiplier(exp),
+            deriv::<T>(&multiplicand(exp), variable, &optable),
+        ),
+        make_product::<T>(
+            deriv::<T>(&multiplier(exp), variable, &optable),
+            multiplicand(exp),
+        ),
+    )
 }
-fn make_exp_of_deriv<T: Num + Clone + std::fmt::Debug + Pow<T, Output = T> + 'static>(
+
+/// 幂表达式的求导规则
+fn deriv_exp<T: Num + Clone + std::fmt::Debug + Pow<T, Output = T> + 'static>(
     exp: &List,
     variable: &List,
     optable: impl Fn(List) -> Option<List>,
 ) -> List {
-    let base = base(exp);
-    let base_cloned = base.clone();
-    let exponent = exponent(exp);
-    let exp_1 = make_sum::<T>(exponent.clone(), (T::zero() - T::one()).to_listv());
     make_product::<T>(
-        make_product::<T>(exponent, make_exp::<T>(base, exp_1)),
-        deriv::<T>(&base_cloned, variable, &optable),
+        make_product::<T>(
+            exponent(exp),
+            make_exp::<T>(
+                base(exp),
+                make_sum::<T>(exponent(exp), (T::zero() - T::one()).to_listv()),
+            ),
+        ),
+        deriv::<T>(&base(exp), variable, &optable),
     )
 }
 
 fn main() {
+    // 创建操作符表
     let optable: Rc<dyn Fn(&str) -> ClosureWrapper> = make_table_2d();
     let op_cloned = optable.clone();
     let get = move |args: List| optable("lookup").call(&args);
     let put = move |args: List| op_cloned("insert").call(&args);
 
-    // install deriv sum func
-    let get_cloned = get.clone();
-    let sum_closure = move |args: &List| {
-        let a1 = args.head();
-        let a2 = args.tail().head();
-
-        Some(make_sum_of_deriv::<f64>(&a1, &a2, &get_cloned))
+    // 安装求导规则
+    let install_rule = |op: String, rule: ClosureWrapper| {
+        put(list!["deriv", op, rule]);
     };
-    put(list!["deriv", "+", ClosureWrapper::new(sum_closure)]);
 
-    // install deriv product func
+    // 安装求和规则
     let get_cloned = get.clone();
-    let product_closure = move |args: &List| {
-        let a1 = args.head();
-        let a2 = args.tail().head();
+    install_rule(
+        "+".to_string(),
+        ClosureWrapper::new(move |args: &List| {
+            Some(deriv_sum::<f64>(
+                &args.head(),
+                &args.tail().head(),
+                &get_cloned,
+            ))
+        }),
+    );
 
-        Some(make_product_of_deriv::<f64>(&a1, &a2, &get_cloned))
-    };
-    put(list!["deriv", "*", ClosureWrapper::new(product_closure)]);
+    // 安装乘积规则
+    let get_cloned = get.clone();
+    install_rule(
+        "*".to_string(),
+        ClosureWrapper::new(move |args: &List| {
+            Some(deriv_product::<f64>(
+                &args.head(),
+                &args.tail().head(),
+                &get_cloned,
+            ))
+        }),
+    );
 
-    // install deriv exp func
+    // 安装幂运算规则
     let get_cloned = get.clone();
-    let exp_closure = move |args: &List| {
-        let a1 = args.head();
-        let a2 = args.tail().head();
-        Some(make_exp_of_deriv::<f64>(&a1, &a2, &get_cloned))
-    };
-    put(list!["deriv", "**", ClosureWrapper::new(exp_closure)]);
-    // test deriv sum&product
-    let exp = list!("*", list!("*", "x", "y"), list!("+", "x", 4.0));
-    let get_cloned = get.clone();
-    println!("{}",deriv::<f64>(&exp, &"x".to_listv(), &get_cloned).pretty_print());
-    // test deriv exp
-    let exp = list!("**", "x", list!("+", "y", 3.0));
-    let get_cloned = get.clone();
-    println!("{}",deriv::<f64>(&exp, &"x".to_listv(), &get_cloned).pretty_print());
-    let exp = list!("**", "x", "n");
-    let get_cloned = get.clone();
-    println!("{}",deriv::<f64>(&exp, &"x".to_listv(), &get_cloned).pretty_print());
+    install_rule(
+        "**".to_string(),
+        ClosureWrapper::new(move |args: &List| {
+            Some(deriv_exp::<f64>(
+                &args.head(),
+                &args.tail().head(),
+                &get_cloned,
+            ))
+        }),
+    );
+
+    // 测试求导规则
+    let exp1 = list!("*", list!("*", "x", "y"), list!("+", "x", 4.0));
+    println!(
+        "{}",
+        deriv::<f64>(&exp1, &"x".to_listv(), &get).pretty_print()
+    );
+
+    let exp2 = list!("**", "x", list!("+", "y", 3.0));
+    println!(
+        "{}",
+        deriv::<f64>(&exp2, &"x".to_listv(), &get).pretty_print()
+    );
+
+    let exp3 = list!("**", "x", "n");
+    println!(
+        "{}",
+        deriv::<f64>(&exp3, &"x".to_listv(), &get).pretty_print()
+    );
 }
+// Output
+// ("+", ("*", "x", "y"), ("*", "y", ("+", "x", 4.0)))
+// ("*", ("+", "y", 3.0), ("**", "x", ("+", ("+", "y", 3.0), -1.0)))
+// ("*", "n", ("**", "x", ("+", "n", -1.0)))
