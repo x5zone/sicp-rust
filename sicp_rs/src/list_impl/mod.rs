@@ -433,6 +433,30 @@ impl List {
             List::V(_) => 1,
         }
     }
+    pub fn pretty_print(&self) -> String {
+        format!(
+            "({}",
+            self.accumulate(
+                |current, result| {
+                    let print_str = if current.is_empty() {
+                        // accumulate never return empty list, do nothing
+                        "".to_string()
+                    } else if current.is_pair() {
+                        current.pretty_print()
+                    } else {
+                        current.to_string()
+                    };
+                    //println!("current value:{} print_str {}", current, print_str);
+                    if result.starts_with(")") || result == "" {
+                        format!("{}{}", print_str, result)
+                    } else {
+                        format!("{}, {}", print_str, result)
+                    }
+                },
+                ")".to_string(),
+            )
+        )
+    }
 }
 
 #[inline(always)]
