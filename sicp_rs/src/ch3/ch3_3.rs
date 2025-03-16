@@ -54,15 +54,10 @@ pub fn front_queue(queue: &List) -> List {
 /// 3.3.3 表格的表示
 
 fn assoc(key: &List, records: &List) -> Option<List> {
-    assert!(
-        key.is_value() && key.is_string_value(),
-        "assoc key must be string"
-    );
-
     if records.is_empty() {
         None
     } else if *key == records.head().head() {
-        // List::V(_) == List::V(_)
+        // List::V(_) == List::V(_) or List::Cons(_,_) == List::Cons(_,_)
         Some(records.head().clone())
     } else {
         assoc(key, &records.tail())

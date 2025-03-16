@@ -335,7 +335,7 @@ impl List {
         F: Fn(&List) -> List,
     {
         self.map(fun)
-            .accumulate(|current, result| result.append(&current), List::Nil)
+            .accumulate(|current, result| current.append(&result), List::Nil)
     }
     pub fn for_each<F>(&self, fun: F) -> ()
     where

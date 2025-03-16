@@ -9,25 +9,31 @@ fn apply_generic(
     args: &List,
     get: impl Fn(List) -> Option<List> + 'static,
 ) -> Option<List> {
+    let args = if args.head().is_pair() && args.head().head().is_pair() {
+        // 处理可能由于apply_generic导致的嵌套列表
+        args.flatmap(|x| x.clone())
+    } else {
+        args.clone()
+    };
     let op_cloned = op.clone();
     println!("apply generic op:{}, args:{}", op_cloned, args);
-    let type_tags = type_tag(args);
+    let type_tags = args.map(|x| type_tag(x));
     let op = get(list![op.clone(), type_tags]);
     if let Some(op) = op {
         if let Ok(op) = op.try_as_basis_value::<ClosureWrapper>() {
-            return op.call(&contents(args));
+            return op.call(&args.map(|x| contents(x)));
         }
     }
     panic!("No method for these types op:{}, args:{}", op_cloned, args);
 }
 fn magnitude(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     println!("magnitude {}", z);
-    apply_generic(&"magnitude".to_listv(), z, get).unwrap()
+    apply_generic(&"magnitude".to_listv(), &list![z.clone()], get).unwrap()
 }
 fn install_rectangular_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
-    let real_part = ClosureWrapper::new(move |x: &List| Some(x.head()));
+    let real_part = ClosureWrapper::new(move |x: &List| Some(x.head().head()));
 
-    let imag_part = ClosureWrapper::new(move |x: &List| Some(x.tail()));
+    let imag_part = ClosureWrapper::new(move |x: &List| Some(x.head().tail()));
 
     let (real_cloned, imag_cloned) = (real_part.clone(), imag_part.clone());
     let magnitude = ClosureWrapper::new(move |x: &List| {
@@ -41,9 +47,11 @@ fn install_rectangular_package(put: impl Fn(List) -> Option<List> + 'static) -> 
 
     let make_from_real_imag = |x: List, y: List| pair![x, y];
     let tag = |x| attach_tag("rectangular", &x);
-    put(list!["real_part", "rectangular", real_part]);
-    put(list!["imag_part", "rectangular", imag_part]);
-    put(list!["magnitude", "rectangular", magnitude]);
+    // 注意安装操作符时，若action为具体的运算，则key2为list!包裹，list中为所有参与运算的参数的类型
+    put(list!["real_part", list!["rectangular"], real_part]);
+    put(list!["imag_part", list!["rectangular"], imag_part]);
+    put(list!["magnitude", list!["rectangular"], magnitude]);
+    // 注意安装操作符时，若action为make，则key2为单值，值为具体的类型名称
     put(list![
         "make_from_real_imag",
         "rectangular",
@@ -58,7 +66,7 @@ fn install_rectangular_package(put: impl Fn(List) -> Option<List> + 'static) -> 
 
 fn install_polar_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
     let magnitude = ClosureWrapper::new(move |x: &List| Some(contents(x).head()));
-    put(list!["magnitude", "polar", magnitude]);
+    put(list!["magnitude", list!["polar"], magnitude]);
     Some("done".to_string().to_listv())
 }
 fn install_complex_packages(
@@ -110,6 +118,6 @@ fn main() {
     let get_cloned = get.clone();
     let magnitude_wrapper =
         ClosureWrapper::new(move |x: &List| Some(magnitude(x, get_cloned.clone())));
-    put(list!["magnitude", "complex", magnitude_wrapper]);
+    put(list!["magnitude", list!["complex"], magnitude_wrapper]);
     println!("{}", magnitude(&a, get.clone()))
 }
