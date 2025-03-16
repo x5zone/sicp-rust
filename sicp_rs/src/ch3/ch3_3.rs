@@ -160,6 +160,7 @@ pub fn make_table_2d() -> Rc<dyn Fn(&str) -> ClosureWrapper> {
         }
     })
 }
+
 #[cfg(test)]
 mod test_table_2d {
     use super::*;
