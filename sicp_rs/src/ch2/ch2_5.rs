@@ -29,6 +29,12 @@ pub fn magnitude(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List
 pub fn angle(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     apply_generic(&"angle".to_listv(), &list![z.clone()], get).unwrap()
 }
+pub fn is_equal(x: &List, y: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+    apply_generic(&"equal".to_listv(), &list![x.clone(), y.clone()], get).unwrap()
+}
+pub fn is_equal_to_zero(x: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+    apply_generic(&"is_equal_to_zero".to_listv(), &list![x.clone()], get).unwrap()
+}
 pub fn install_javascript_number_package(
     put: impl Fn(List) -> Option<List> + 'static,
 ) -> Option<List> {
@@ -73,6 +79,22 @@ pub fn install_javascript_number_package(
         ClosureWrapper::new(move |args: &List| {
             let (x, y) = get_x_y(args);
             Some(tag((x / y).to_listv()))
+        })
+    ]);
+    put(list![
+        "equal",
+        list!["javascript_number", "javascript_number"],
+        ClosureWrapper::new(move |args: &List| {
+            let (x, y) = (args.head(), args.tail().head());
+            Some((x == y).to_listv())
+        })
+    ]);
+
+    put(list![
+        "is_equal_to_zero",
+        list!["javascript_number"],
+        ClosureWrapper::new(move |args: &List| {
+            Some((args.head() == 0.0.to_listv()).to_listv())
         })
     ]);
     put(list![
@@ -155,8 +177,9 @@ pub fn install_rational_package(put: impl Fn(List) -> Option<List> + 'static) ->
         let (numer_x, denom_x, numer_y, denom_y) = get_numer_and_denom_cloned(args);
         make_rat_cloned.call(&list![numer_x * denom_y, denom_x * numer_y])
     });
-    let tag = |x| attach_tag("rational", &x);
 
+    let tag = |x| attach_tag("rational", &x);
+    let numer_cloned = numer.clone();
     put(list!["numer", list!["rational"], numer]);
     put(list!["denom", list!["rational"], denom]);
     let tag_cloned = tag.clone();
@@ -181,10 +204,27 @@ pub fn install_rational_package(put: impl Fn(List) -> Option<List> + 'static) ->
         ClosureWrapper::new(move |args| { Some(tag_cloned(div_rat.call(args).unwrap())) })
     ]);
     put(list![
+        "equal",
+        list!["rational", "rational"],
+        ClosureWrapper::new(move |args: &List| {
+            let (numer_x, denom_x, numer_y, denom_y) = get_numer_and_denom(args);
+            Some((numer_x == numer_y && denom_x == denom_y).to_listv())
+        })
+    ]);
+    put(list![
+        "is_equal_to_zero",
+        list!["rational"],
+        ClosureWrapper::new(move |args: &List| {
+            let numer_x = numer_cloned.clone().call(&list![args.head()]).unwrap();
+            Some((numer_x == 0.to_listv()).to_listv())
+        })
+    ]);
+    put(list![
         "make",
         "rational",
         ClosureWrapper::new(move |args| { Some(tag_cloned(make_rat.call(args).unwrap())) })
     ]);
+
     Some("done".to_string().to_listv())
 }
 pub fn make_rational(n: List, d: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
@@ -390,6 +430,21 @@ pub fn install_complex_packages(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> 
         let (r2, i2) = get_mantitude_and_angle_cloned(z2);
         make_from_mag_ang_cloned((r1 / r2).to_listv(), (i1 - i2).to_listv())
     };
+    let get_real_imag_cloned = get_real_imag.clone();
+    let equal = ClosureWrapper::new(move |args: &List| {
+        let (real_x, imag_x) = get_real_imag_cloned(&args.head());
+        let (real_y, imag_y) = get_real_imag_cloned(&args.tail().head());
+        Some((real_x == real_y && imag_x == imag_y).to_listv())
+    });
+    let get_cloned = get.clone();
+    let is_equal_to_zero = ClosureWrapper::new(move |args: &List| {
+        let z = args.head();
+        let (real_x, imag_x) = (
+            real_part(&z, get_cloned.clone()),
+            imag_part(&z, get_cloned.clone()),
+        );
+        Some((real_x == 0.0.to_listv() && imag_x == 0.0.to_listv()).to_listv())
+    });
     let tag = |x| attach_tag("complex", &x);
     put(list![
         "add",
@@ -423,7 +478,12 @@ pub fn install_complex_packages(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> 
             Some(tag(div_complex(&z1, &z2)))
         })
     ]);
-
+    put(list!["equal", list!["complex", "complex"], equal]);
+    put(list![
+        "is_equal_to_zero",
+        list!["complex"],
+        is_equal_to_zero
+    ]);
     put(list![
         "make_from_real_imag",
         "complex",
