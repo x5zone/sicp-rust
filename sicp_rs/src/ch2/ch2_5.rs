@@ -4,9 +4,28 @@ use num::Integer;
 
 use crate::ch2::ch2_4::{apply_generic, attach_tag, contents};
 use crate::prelude::*;
+const COMPLEX_ERROR_MESSAGE: &str = "complex only supports f64, please construct complex with f64";
+const JAVASCRIPT_NUMBER_ERROR_MESSAGE: &str =
+    "javascript number only supports f64, please construct javascript number with f64";
+const RATIONAL_ERROR_MESSAGE: &str =
+    "rational only supports f64, please construct rational with f64";
 
-pub fn add(x: &List, y: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"add".to_listv(), &list![x.clone(), y.clone()], get).unwrap()
+pub fn add(
+    x: &List,
+    y: &List,
+    get: impl Fn(List) -> Option<List> + 'static,
+    coercion: &List,
+) -> List {
+    if coercion.is_empty() {
+        apply_generic(&"add".to_listv(), &list![x.clone(), y.clone()], get).unwrap()
+    } else {
+        apply_generic(
+            &pair![list!["coercion", coercion.clone()], "add"],
+            &list![x.clone(), y.clone()],
+            get,
+        )
+        .unwrap()
+    }
 }
 pub fn sub(x: &List, y: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     apply_generic(&"sub".to_listv(), &list![x.clone(), y.clone()], get).unwrap()
@@ -44,8 +63,10 @@ pub fn install_javascript_number_package(
     let get_x_y = |args: &List| {
         let (x, y) = (args.head(), args.tail().head());
         let (x, y) = (
-            x.try_as_basis_value::<f64>().unwrap(),
-            y.try_as_basis_value::<f64>().unwrap(),
+            x.try_as_basis_value::<f64>()
+                .expect(JAVASCRIPT_NUMBER_ERROR_MESSAGE),
+            y.try_as_basis_value::<f64>()
+                .expect(JAVASCRIPT_NUMBER_ERROR_MESSAGE),
         );
         (*x, *y)
     };
@@ -120,8 +141,8 @@ pub fn install_rational_package(put: impl Fn(List) -> Option<List> + 'static) ->
     let make_rat = ClosureWrapper::new(move |args: &List| {
         let (n, d) = (args.head(), args.tail().head());
         let (n, d) = (
-            n.try_as_basis_value::<i32>().unwrap(),
-            d.try_as_basis_value::<i32>().unwrap(),
+            n.try_as_basis_value::<i32>().expect(RATIONAL_ERROR_MESSAGE),
+            d.try_as_basis_value::<i32>().expect(RATIONAL_ERROR_MESSAGE),
         );
         let g = (*n).gcd(d);
         Some(pair!(n / g, d / g))
@@ -136,10 +157,18 @@ pub fn install_rational_package(put: impl Fn(List) -> Option<List> + 'static) ->
             denom_cloned.clone().call(&list![y]).unwrap(),
         );
         let (numer_x, denom_x, numer_y, denom_y) = (
-            numer_x.try_as_basis_value::<i32>().unwrap(),
-            denom_x.try_as_basis_value::<i32>().unwrap(),
-            numer_y.try_as_basis_value::<i32>().unwrap(),
-            denom_y.try_as_basis_value::<i32>().unwrap(),
+            numer_x
+                .try_as_basis_value::<i32>()
+                .expect(RATIONAL_ERROR_MESSAGE),
+            denom_x
+                .try_as_basis_value::<i32>()
+                .expect(RATIONAL_ERROR_MESSAGE),
+            numer_y
+                .try_as_basis_value::<i32>()
+                .expect(RATIONAL_ERROR_MESSAGE),
+            denom_y
+                .try_as_basis_value::<i32>()
+                .expect(RATIONAL_ERROR_MESSAGE),
         );
         (*numer_x, *denom_x, *numer_y, *denom_y)
     };
@@ -247,8 +276,8 @@ pub fn install_rectangular_package(put: impl Fn(List) -> Option<List> + 'static)
             imag_cloned.call(args).unwrap(),
         );
         let (r, i) = (
-            r.try_as_basis_value::<f64>().unwrap(),
-            i.try_as_basis_value::<f64>().unwrap(),
+            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
+            i.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
         );
         (*r, *i)
     };
@@ -267,8 +296,8 @@ pub fn install_rectangular_package(put: impl Fn(List) -> Option<List> + 'static)
 
     let make_from_mag_ang = move |r: List, a: List| {
         let (r, a) = (
-            r.try_as_basis_value::<f64>().unwrap(),
-            a.try_as_basis_value::<f64>().unwrap(),
+            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
+            a.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
         );
         make_from_real_imag((r * a.cos()).to_listv(), (r * a.sin()).to_listv())
     };
@@ -309,8 +338,8 @@ pub fn install_polar_package(put: impl Fn(List) -> Option<List> + 'static) -> Op
             angle_cloned.call(args).unwrap(),
         );
         let (m, a) = (
-            m.try_as_basis_value::<f64>().unwrap(),
-            a.try_as_basis_value::<f64>().unwrap(),
+            m.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
+            a.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
         );
         (*m, *a)
     };
@@ -327,8 +356,8 @@ pub fn install_polar_package(put: impl Fn(List) -> Option<List> + 'static) -> Op
     let make_from_mag_ang = move |r: List, a: List| pair![r, a];
     let make_from_real_imag = move |r: List, a: List| {
         let (r, a) = (
-            r.try_as_basis_value::<f64>().unwrap(),
-            a.try_as_basis_value::<f64>().unwrap(),
+            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
+            a.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
         );
         pair![(r * r + a * a).sqrt(), (a.atan2(*r))]
     };
@@ -384,8 +413,8 @@ pub fn install_complex_packages(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> 
         let (get1, get2) = (get_cloned.clone(), get_cloned.clone());
         let (r, i) = (real_part(z, get1), imag_part(z, get2));
         let (r, i) = (
-            r.try_as_basis_value::<f64>().unwrap(),
-            i.try_as_basis_value::<f64>().unwrap(),
+            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
+            i.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
         );
         (*r, *i)
     };
@@ -409,8 +438,8 @@ pub fn install_complex_packages(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> 
         let (get1, get2) = (get_cloned.clone(), get_cloned.clone());
         let (r, a) = (magnitude(z, get1), angle(z, get2));
         let (r, a) = (
-            r.try_as_basis_value::<f64>().unwrap(),
-            a.try_as_basis_value::<f64>().unwrap(),
+            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
+            a.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
         );
         (*r, *a)
     };
@@ -527,4 +556,45 @@ pub fn make_complex_from_mag_ang(
         .unwrap()
         .call(&list![r, a])
         .unwrap()
+}
+// coercion support
+pub fn put_coercion(
+    type1: &List,
+    type2: &List,
+    proc: ClosureWrapper,
+    coercion_list: &List,
+) -> List {
+    if get_coercion(type1, type2, coercion_list).is_none() {
+        pair![
+            list![type1.clone(), type2.clone(), proc],
+            coercion_list.clone()
+        ]
+    } else {
+        coercion_list.clone()
+    }
+}
+pub fn get_coercion(type1: &List, type2: &List, coercion_list: &List) -> Option<List> {
+    fn get_type1(list_item: &List) -> List {
+        list_item.head()
+    }
+    fn get_type2(list_item: &List) -> List {
+        list_item.tail().head()
+    }
+    fn get_proc(list_item: &List) -> List {
+        list_item.tail().tail().head()
+    }
+    fn get_coercion_iter(type1: &List, type2: &List, items: &List) -> Option<List> {
+        if items.is_empty() {
+            None
+        } else {
+            let top = items.head();
+
+            if get_type1(&top) == *type1 && get_type2(&top) == *type2 {
+                Some(get_proc(&top))
+            } else {
+                get_coercion_iter(type1, type2, &items.tail())
+            }
+        }
+    }
+    get_coercion_iter(type1, type2, coercion_list)
 }

@@ -1,4 +1,6 @@
 use crate::prelude::*;
+
+use super::ch2_5::get_coercion;
 pub fn attach_tag(tag: &str, contents: &List) -> List {
     // Only Support f64
     if contents.is_value() && contents.try_as_basis_value::<f64>().is_ok() {
@@ -39,13 +41,51 @@ pub fn apply_generic(
     } else {
         args.clone()
     };
+    // 为兼容历史代码与习题，不改变函数签名的同时，支持coercion
+    // op 结构为 pair![list!["coercion", coercion], op]
+    let (op, coercion) =
+        if op.is_pair() && op.head().is_pair() && op.head().head() == "coercion".to_listv() {
+            
+            (op.tail(), op.head().tail().head())
+        } else {
+            (op.clone(), List::Nil)
+        };
     let op_cloned = op.clone();
     let type_tags = args.map(|x| type_tag(x));
+    let type_tags_cloned = type_tags.clone();
     let op = get(list![op.clone(), type_tags]);
     if let Some(op) = op {
         if let Ok(op) = op.try_as_basis_value::<ClosureWrapper>() {
             return op.call(&args.map(|x| contents(x)));
+        } else {
+            None
+        }
+    } else {
+        if args.length() == 2 {
+            let type1 = type_tags_cloned.head();
+            let type2 = type_tags_cloned.tail().head();
+            if type1 == type2 {
+                panic!("No method for these types op:{}, args:{}", op_cloned, args);
+            }
+            let a1 = args.head();
+            let a2 = args.tail().head();
+            let t1_to_t2 = get_coercion(&type1, &type2, &coercion);
+            let t2_to_t1 = get_coercion(&type2, &type1, &coercion);
+            if t1_to_t2.is_some() {
+                let t1_to_t2 = t1_to_t2.unwrap();
+                let t1_to_t2 = t1_to_t2.try_as_basis_value::<ClosureWrapper>().unwrap();
+                let a1 = t1_to_t2.call(&list![a1.clone()]);
+                apply_generic(&op_cloned, &list![a1.unwrap(), a2], get)
+            } else if t2_to_t1.is_some() {
+                let t2_to_t1 = t2_to_t1.unwrap();
+                let t2_to_t1 = t2_to_t1.try_as_basis_value::<ClosureWrapper>().unwrap();
+                let a2 = t2_to_t1.call(&list![a2.clone()]);
+                apply_generic(&op_cloned, &list![a1, a2.unwrap()], get)
+            } else {
+                panic!("No method for these types op:{}, args:{}", op_cloned, args);
+            }
+        } else {
+            panic!("No method for these types op:{}, args:{}", op_cloned, args);
         }
     }
-    panic!("No method for these types op:{}, args:{}", op_cloned, args);
 }

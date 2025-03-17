@@ -9,5 +9,5 @@ fn main() {
     let put = move |args: List| op_cloned("insert").call(&args);
 
     install_javascript_number_package(put.clone());
-    println!("{}", add(&1.0.to_listv(), &2.0.to_listv(), get));
+    println!("{}", add(&1.0.to_listv(), &2.0.to_listv(), get, &List::Nil));
 }
