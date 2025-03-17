@@ -54,6 +54,8 @@ pub fn is_equal(x: &List, y: &List, get: impl Fn(List) -> Option<List> + 'static
 pub fn is_equal_to_zero(x: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     apply_generic(&"is_equal_to_zero".to_listv(), &list![x.clone()], get).unwrap()
 }
+
+
 pub fn install_javascript_number_package(
     put: impl Fn(List) -> Option<List> + 'static,
 ) -> Option<List> {
