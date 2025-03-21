@@ -1,5 +1,6 @@
 use crate::list_impl::panic_with_location;
 use crate::prelude::*;
+use std::env::Args;
 use std::rc::Rc;
 
 /// 3.3.2 队列的表示
@@ -128,12 +129,13 @@ pub fn insert_2d(key1: &List, key2: &List, value: List, local_table: List) -> Op
 
 pub fn make_table_2d() -> Rc<dyn Fn(&str) -> ClosureWrapper> {
     let local_table = Rc::new(list!["*table*"]);
+    let local1 = local_table.clone();
     let local2 = local_table.clone();
     // 必须将闭包显式写在此处,以方便编译器推断生命周期;若这部分代码直接写在下面的闭包中,则编译器无法推断生命周期,编译失败.
     let lookup = move |args: &List| {
         let a1 = args.head();
         let a2 = args.tail().head();
-        let lt = local_table.clone();
+        let lt = local1.clone();
 
         lookup_2d(&a1, &a2, &lt)
     };
@@ -150,6 +152,14 @@ pub fn make_table_2d() -> Rc<dyn Fn(&str) -> ClosureWrapper> {
             ClosureWrapper::new(lookup.clone())
         } else if m == "insert" {
             ClosureWrapper::new(insert.clone())
+        } else if m == "assoc" {
+            ClosureWrapper::new({
+                let lt = local_table.clone();
+                move |args| {
+                    let key1 = args.head();
+                    assoc(&key1, &lt.tail())
+                }
+            })
         } else {
             panic!("unknown message")
         }

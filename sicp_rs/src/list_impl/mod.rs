@@ -494,7 +494,7 @@ impl fmt::Display for List {
                 )
             }
             List::V(t) => {
-                write!(f, "{:?}", t)
+                write!(f, "{}", t.as_ref().as_string())
             }
 
             List::Nil => write!(f, "Nil"),

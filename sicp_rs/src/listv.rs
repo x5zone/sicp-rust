@@ -54,7 +54,15 @@ pub trait ListV: Any + Debug {
         ptr::eq(self.as_any() as *const _, other.as_any() as *const _)
     }
     fn as_string(&self) -> String {
-        format!("{:?}", self)
+        // 避免{:?}转义特殊字符，若为字符串，则直接返回。
+        if let Some(s) = self.as_any().downcast_ref::<String>() {
+            return s.clone();
+        }
+        if let Some(s) = self.as_any().downcast_ref::<&str>() {
+            return s.to_string();
+        }
+
+        return format!("{:?}", self);
     }
     fn to_listv(self) -> List;
 }
