@@ -7,6 +7,8 @@ use crate::prelude::*;
 const COMPLEX_ERROR_MESSAGE: &str = "complex only supports f64, please construct complex with f64";
 const JAVASCRIPT_NUMBER_ERROR_MESSAGE: &str =
     "javascript number only supports f64, please construct javascript number with f64";
+const JAVASCRIPT_INTEGER_ERROR_MESSAGE: &str =
+    "javascript integer only supports i32, please construct javascript integer with i32";
 const RATIONAL_ERROR_MESSAGE: &str =
     "rational only supports f64, please construct rational with f64";
 
@@ -42,6 +44,12 @@ pub fn real_part(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List
 pub fn imag_part(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     apply_generic(&"imag_part".to_listv(), &list![z.clone()], get).unwrap()
 }
+pub fn numer(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+    apply_generic(&"numer".to_listv(), &list![z.clone()], get).unwrap()
+}
+pub fn denom(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+    apply_generic(&"denom".to_listv(), &list![z.clone()], get).unwrap()
+}
 pub fn magnitude(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     apply_generic(&"magnitude".to_listv(), &list![z.clone()], get).unwrap()
 }
@@ -56,6 +64,85 @@ pub fn is_equal_to_zero(x: &List, get: impl Fn(List) -> Option<List> + 'static) 
 }
 
 
+
+pub fn install_javascript_integer_package(
+    put: impl Fn(List) -> Option<List> + 'static,
+) -> Option<List> {
+    let tag = |x| attach_tag("integer", &x);
+    // put将以操作符和操作数类型为key，将操作函数放入二维表格中。
+    // 由于泛型函数为一集函数，而非一个函数，我们无法将一集函数放入二维表格，故此处仅按照i32来实现。
+    let get_x_y = |args: &List| {
+        let (x, y) = (args.head(), args.tail().head());
+        let (x, y) = (
+            x.try_as_basis_value::<i32>()
+                .expect(JAVASCRIPT_INTEGER_ERROR_MESSAGE),
+            y.try_as_basis_value::<i32>()
+                .expect(JAVASCRIPT_INTEGER_ERROR_MESSAGE),
+        );
+        (*x, *y)
+    };
+    put(list![
+        "add",
+        list!["integer", "integer"],
+        ClosureWrapper::new(move |args: &List| {
+            let (x, y) = get_x_y(args);
+            Some(tag((x + y).to_listv()))
+        })
+    ]);
+    put(list![
+        "sub",
+        list!["integer", "integer"],
+        ClosureWrapper::new(move |args: &List| {
+            let (x, y) = get_x_y(args);
+            Some(tag((x - y).to_listv()))
+        })
+    ]);
+    put(list![
+        "mul",
+        list!["integer", "integer"],
+        ClosureWrapper::new(move |args: &List| {
+            let (x, y) = get_x_y(args);
+            Some(tag((x * y).to_listv()))
+        })
+    ]);
+    put(list![
+        "div",
+        list!["integer", "integer"],
+        ClosureWrapper::new(move |args: &List| {
+            let (x, y) = get_x_y(args);
+            Some(tag((x / y).to_listv()))
+        })
+    ]);
+    put(list![
+        "equal",
+        list!["integer", "integer"],
+        ClosureWrapper::new(move |args: &List| {
+            let (x, y) = (args.head(), args.tail().head());
+            Some((x == y).to_listv())
+        })
+    ]);
+
+    put(list![
+        "is_equal_to_zero",
+        list!["integer"],
+        ClosureWrapper::new(move |args: &List| { Some((args.head() == 0.to_listv()).to_listv()) })
+    ]);
+    put(list![
+        "make",
+        "integer",
+        ClosureWrapper::new(move |x: &List| { Some(tag(x.head())) })
+    ]);
+
+    Some("done".to_string().to_listv())
+}
+pub fn make_javascript_integer(x: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+    get(list!["make", "integer"])
+        .unwrap()
+        .try_as_basis_value::<ClosureWrapper>()
+        .unwrap()
+        .call(&list![x])
+        .unwrap()
+}
 pub fn install_javascript_number_package(
     put: impl Fn(List) -> Option<List> + 'static,
 ) -> Option<List> {

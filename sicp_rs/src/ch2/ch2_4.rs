@@ -45,7 +45,6 @@ pub fn apply_generic(
     // op 结构为 pair![list!["coercion", coercion], op]
     let (op, coercion) =
         if op.is_pair() && op.head().is_pair() && op.head().head() == "coercion".to_listv() {
-            
             (op.tail(), op.head().tail().head())
         } else {
             (op.clone(), List::Nil)
