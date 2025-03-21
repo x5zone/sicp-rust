@@ -424,6 +424,16 @@ impl List {
             List::V(_) => 1,
         }
     }
+    pub fn find_index(&self, x: &List) -> Option<usize> {
+        if self.head().is_empty() {
+            None
+        } else if self.head() == *x {
+            Some(0)
+        } else {
+            let n = self.tail().find_index(x);
+            if let Some(n) = n { Some(n + 1) } else { None }
+        }
+    }
     pub fn deep_length(&self) -> usize {
         match self {
             List::Nil => 0,

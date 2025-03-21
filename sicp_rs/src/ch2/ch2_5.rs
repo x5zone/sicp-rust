@@ -62,8 +62,60 @@ pub fn is_equal(x: &List, y: &List, get: impl Fn(List) -> Option<List> + 'static
 pub fn is_equal_to_zero(x: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     apply_generic(&"is_equal_to_zero".to_listv(), &list![x.clone()], get).unwrap()
 }
+pub fn raise(x: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+    apply_generic(&"raise".to_listv(), &list![x.clone()], get).unwrap()
+}
 
+pub fn install_arithmetic_raise_package(
+    optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
+) -> Option<List> {
+    let op_cloned = optable.clone();
+    let get = move |args: List| optable("lookup").call(&args);
+    let put = move |args: List| op_cloned("insert").call(&args);
+    let get_cloned = get.clone();
+    put(list![
+        "raise",
+        list!["integer"],
+        ClosureWrapper::new(move |args| {
+            Some(make_rational(args.head(), 1.to_listv(), get_cloned.clone()))
+        })
+    ]);
+    let get_cloned = get.clone();
+    put(list![
+        "raise",
+        list!["rational"],
+        ClosureWrapper::new(move |args| {
+            let (numer_x, denom_x) = (args.head().head(), args.head().tail());
+            let (numer_x, denom_x) = (
+                numer_x
+                    .try_as_basis_value::<i32>()
+                    .expect(RATIONAL_ERROR_MESSAGE),
+                denom_x
+                    .try_as_basis_value::<i32>()
+                    .expect(RATIONAL_ERROR_MESSAGE),
+            );
+            Some(make_javascript_number(
+                ((*numer_x as f64) / (*denom_x as f64)).to_listv(),
+                get_cloned.clone(),
+            ))
+        })
+    ]);
+    let get_cloned = get.clone();
+    put(list![
+        "raise",
+        list!["javascript_number"],
+        ClosureWrapper::new(move |args| {
+            let i = args.head();
 
+            Some(make_complex_from_real_imag(
+                i,
+                0.0.to_listv(),
+                get_cloned.clone(),
+            ))
+        })
+    ]);
+    Some("done".to_string().to_listv())
+}
 
 pub fn install_javascript_integer_package(
     put: impl Fn(List) -> Option<List> + 'static,
@@ -135,7 +187,10 @@ pub fn install_javascript_integer_package(
 
     Some("done".to_string().to_listv())
 }
-pub fn make_javascript_integer(x: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+pub fn make_javascript_integer(
+    x: List,
+    get: impl Fn(List) -> Option<List> + 'static,
+) -> List {
     get(list!["make", "integer"])
         .unwrap()
         .try_as_basis_value::<ClosureWrapper>()
@@ -215,7 +270,10 @@ pub fn install_javascript_number_package(
 
     Some("done".to_string().to_listv())
 }
-pub fn make_javascript_number(x: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+pub fn make_javascript_number(
+    x: List,
+    get: impl Fn(List) -> Option<List> + 'static,
+) -> List {
     get(list!["make", "javascript_number"])
         .unwrap()
         .try_as_basis_value::<ClosureWrapper>()
@@ -223,7 +281,9 @@ pub fn make_javascript_number(x: List, get: impl Fn(List) -> Option<List> + 'sta
         .call(&list![x])
         .unwrap()
 }
-pub fn install_rational_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
+pub fn install_rational_package(
+    put: impl Fn(List) -> Option<List> + 'static,
+) -> Option<List> {
     let numer = ClosureWrapper::new(move |x: &List| Some(x.head().head()));
 
     let denom = ClosureWrapper::new(move |x: &List| Some(x.head().tail()));
@@ -345,7 +405,11 @@ pub fn install_rational_package(put: impl Fn(List) -> Option<List> + 'static) ->
 
     Some("done".to_string().to_listv())
 }
-pub fn make_rational(n: List, d: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+pub fn make_rational(
+    n: List,
+    d: List,
+    get: impl Fn(List) -> Option<List> + 'static,
+) -> List {
     get(list!["make", "rational"])
         .unwrap()
         .try_as_basis_value::<ClosureWrapper>()
@@ -353,7 +417,9 @@ pub fn make_rational(n: List, d: List, get: impl Fn(List) -> Option<List> + 'sta
         .call(&list![n, d])
         .unwrap()
 }
-pub fn install_rectangular_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
+pub fn install_rectangular_package(
+    put: impl Fn(List) -> Option<List> + 'static,
+) -> Option<List> {
     let real_part = ClosureWrapper::new(move |x: &List| Some(x.head().head()));
 
     let imag_part = ClosureWrapper::new(move |x: &List| Some(x.head().tail()));

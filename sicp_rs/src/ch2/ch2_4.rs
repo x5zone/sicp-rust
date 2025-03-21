@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::{prelude::*};
 
 use super::ch2_5::get_coercion;
 pub fn attach_tag(tag: &str, contents: &List) -> List {
@@ -88,3 +88,4 @@ pub fn apply_generic(
         }
     }
 }
+
