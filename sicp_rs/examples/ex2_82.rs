@@ -302,7 +302,7 @@ fn get_type_coercion(type_x: &List, coercion: &List) -> List {
 fn main() {
     test_transform()
 }
-fn test_get_func_argtypes() {
+fn _test_get_func_argtypes() {
     let optable = make_table_2d();
 
     let op_cloned = optable.clone();
@@ -334,7 +334,7 @@ fn test_get_func_argtypes() {
     )
     //((("type2", ("type5", ("type4", Nil))), A closure wrapped in ClosureWrapper), ((("type1", ("type2", ("type3", Nil))), A closure wrapped in ClosureWrapper), Nil))
 }
-fn test_get_type_coercion() {
+fn _test_get_type_coercion() {
     let coercion = put_coercion(
         &"type1".to_listv(),
         &"type2".to_listv(),

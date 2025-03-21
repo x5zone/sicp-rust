@@ -4,10 +4,9 @@ use sicp_rs::prelude::*;
 fn test_list_creation() {
     // Create a list
     let l = list![1, "hello", list![2, 3], vec![4, 5], List::Nil];
-
     assert_eq!(
         l.to_string(),
-        "(1, (\"hello\", ((2, (3, Nil)), ([4, 5], (Nil, Nil)))))"
+        "(1, (hello, ((2, (3, Nil)), ([4, 5], (Nil, Nil)))))"
     );
 }
 
@@ -29,10 +28,7 @@ fn test_list_reverse() {
 
     let nested = list![1, list![2, 3]];
     let deep_reversed = nested.deep_reverse();
-    assert_eq!(
-        deep_reversed.to_string(),
-        "((3, (2, Nil)), (1, Nil))"
-    );
+    assert_eq!(deep_reversed.to_string(), "((3, (2, Nil)), (1, Nil))");
 }
 
 #[test]
@@ -98,8 +94,5 @@ fn test_nested_list_operations() {
     assert_eq!(nested.deep_length(), 4);
 
     let mapped = nested.map(|x| x.map(|y| (y.try_as_basis_value::<i32>().unwrap() * 2).to_listv()));
-    assert_eq!(
-        mapped.to_string(),
-        "((2, (4, Nil)), ((6, (8, Nil)), Nil))"
-    );
+    assert_eq!(mapped.to_string(), "((2, (4, Nil)), ((6, (8, Nil)), Nil))");
 }

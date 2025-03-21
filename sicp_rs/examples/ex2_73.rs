@@ -15,7 +15,7 @@ fn operator(exp: &List) -> List {
 }
 
 /// 获取表达式的操作数
-fn operands(exp: &List) -> List {
+fn _operands(exp: &List) -> List {
     //ch2.56节代码中直接对exp取操作数,故若使用历史代码并同时使用operands,会多取一次tail
     exp.tail()
 }
