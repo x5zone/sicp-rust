@@ -4,6 +4,8 @@ use num::Integer;
 
 use crate::ch2::ch2_4::{apply_generic, attach_tag, contents};
 use crate::prelude::*;
+
+use super::ch2_4::type_tag;
 const COMPLEX_ERROR_MESSAGE: &str = "complex only supports f64, please construct complex with f64";
 const JAVASCRIPT_NUMBER_ERROR_MESSAGE: &str =
     "javascript number only supports f64, please construct javascript number with f64";
@@ -63,7 +65,18 @@ pub fn is_equal_to_zero(x: &List, get: impl Fn(List) -> Option<List> + 'static) 
     apply_generic(&"is_equal_to_zero".to_listv(), &list![x.clone()], get).unwrap()
 }
 pub fn raise(x: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"raise".to_listv(), &list![x.clone()], get).unwrap()
+    if !is_arithmetic_type(x) || type_tag(x) == "complex".to_listv() {
+        x.clone()
+    } else {
+        apply_generic(&"raise".to_listv(), &list![x.clone()], get).unwrap()
+    }
+}
+pub fn project(x: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+    if !is_arithmetic_type(x) || type_tag(x) == "integer".to_listv() {
+        x.clone()
+    } else {
+        apply_generic(&"project".to_listv(), &list![x.clone()], get).unwrap()
+    }
 }
 
 pub fn install_arithmetic_raise_package(
@@ -114,6 +127,67 @@ pub fn install_arithmetic_raise_package(
             ))
         })
     ]);
+    Some("done".to_string().to_listv())
+}
+pub fn install_arithmetic_project_package(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> Option<List> {
+    let op_cloned = optable.clone();
+    let get = move |args: List| optable("lookup").call(&args);
+    let put = move |args: List| op_cloned("insert").call(&args);
+    // project complex to real
+    let get_cloned = get.clone();
+    put(list![
+        "project",
+        list!["complex"],
+        ClosureWrapper::new(move |args| {
+            let real = real_part(&args.head(), get_cloned.clone());
+            Some(make_javascript_number(real, get_cloned.clone()))
+        })
+    ]);
+    // project real to rational
+    let get_cloned = get.clone();
+    put(list![
+        "project",
+        list!["javascript_number"],
+        ClosureWrapper::new(move |args| {
+            let real = args.head();
+            let real = real.try_as_basis_value::<f64>().unwrap();
+            let (numer, denom) = if (real - real.round()).abs().to_listv() == 0.0.to_listv() {
+                // 小数部分等于0，是整数，直接返回
+                (real.round() as i32, 1)
+            } else {
+                let max = (1.0 / (real - real.round()).abs()).round() as f64;
+                if max == (1.0 / (real - real.round()).abs()) {
+                    //1.0除以小数部分，为整数
+                    ((max * real).round() as i32, max.round() as i32)
+                } else {
+                    let numer = (((i32::MAX as f64) / real).round() * real) as i32;
+                    let denom = ((i32::MAX as f64) / real).round() as i32;
+                    (numer, denom)
+                }
+            };
+
+            Some(make_rational(
+                numer.to_listv(),
+                denom.to_listv(),
+                get_cloned.clone(),
+            ))
+        })
+    ]);
+    // project rational to integer
+    let get_cloned = get.clone();
+    put(list![
+        "project",
+        list!["rational"],
+        ClosureWrapper::new(move |args| {
+            let numer = args.head().head();
+            let denom = args.head().tail();
+            let numer = *numer.try_as_basis_value::<i32>().unwrap() as f64;
+            let denom = *denom.try_as_basis_value::<i32>().unwrap() as f64;
+            let i = (numer / denom).floor() as i32;
+            Some(make_javascript_integer(i.to_listv(), get_cloned.clone()))
+        })
+    ]);
+
     Some("done".to_string().to_listv())
 }
 
@@ -187,10 +261,7 @@ pub fn install_javascript_integer_package(
 
     Some("done".to_string().to_listv())
 }
-pub fn make_javascript_integer(
-    x: List,
-    get: impl Fn(List) -> Option<List> + 'static,
-) -> List {
+pub fn make_javascript_integer(x: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     get(list!["make", "integer"])
         .unwrap()
         .try_as_basis_value::<ClosureWrapper>()
@@ -270,10 +341,7 @@ pub fn install_javascript_number_package(
 
     Some("done".to_string().to_listv())
 }
-pub fn make_javascript_number(
-    x: List,
-    get: impl Fn(List) -> Option<List> + 'static,
-) -> List {
+pub fn make_javascript_number(x: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     get(list!["make", "javascript_number"])
         .unwrap()
         .try_as_basis_value::<ClosureWrapper>()
@@ -281,9 +349,7 @@ pub fn make_javascript_number(
         .call(&list![x])
         .unwrap()
 }
-pub fn install_rational_package(
-    put: impl Fn(List) -> Option<List> + 'static,
-) -> Option<List> {
+pub fn install_rational_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
     let numer = ClosureWrapper::new(move |x: &List| Some(x.head().head()));
 
     let denom = ClosureWrapper::new(move |x: &List| Some(x.head().tail()));
@@ -405,11 +471,7 @@ pub fn install_rational_package(
 
     Some("done".to_string().to_listv())
 }
-pub fn make_rational(
-    n: List,
-    d: List,
-    get: impl Fn(List) -> Option<List> + 'static,
-) -> List {
+pub fn make_rational(n: List, d: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
     get(list!["make", "rational"])
         .unwrap()
         .try_as_basis_value::<ClosureWrapper>()
@@ -417,9 +479,7 @@ pub fn make_rational(
         .call(&list![n, d])
         .unwrap()
 }
-pub fn install_rectangular_package(
-    put: impl Fn(List) -> Option<List> + 'static,
-) -> Option<List> {
+pub fn install_rectangular_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
     let real_part = ClosureWrapper::new(move |x: &List| Some(x.head().head()));
 
     let imag_part = ClosureWrapper::new(move |x: &List| Some(x.head().tail()));
@@ -712,6 +772,19 @@ pub fn make_complex_from_mag_ang(
         .call(&list![r, a])
         .unwrap()
 }
+pub fn install_arithmetic_package(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> Option<List> {
+    let op_cloned = optable.clone();
+    let put = move |args: List| op_cloned("insert").call(&args);
+    install_complex_packages(optable.clone());
+    install_rectangular_package(put.clone());
+    install_polar_package(put.clone());
+    install_rational_package(put.clone());
+    install_javascript_number_package(put.clone());
+    install_javascript_integer_package(put.clone());
+    install_arithmetic_raise_package(optable.clone());
+    install_arithmetic_project_package(optable.clone());
+    Some("done".to_string().to_listv())
+}
 // coercion support
 pub fn put_coercion(
     type1: &List,
@@ -752,4 +825,86 @@ pub fn get_coercion(type1: &List, type2: &List, coercion_list: &List) -> Option<
         }
     }
     get_coercion_iter(type1, type2, coercion_list)
+}
+
+const ARITHMETIC_TYPES: [&str; 4] = ["integer", "rational", "javascript_number", "complex"];
+
+pub fn find_arithmetic_type_index(type_tag: &str) -> i32 {
+    for (i, t) in ARITHMETIC_TYPES.iter().enumerate() {
+        if type_tag == *t {
+            return i as i32;
+        }
+    }
+    -1
+}
+pub fn is_arithmetic_type(x: &List) -> bool {
+    find_arithmetic_type_index(&type_tag(x).to_string()) >= 0
+}
+pub fn arithmetic_type_raise(
+    a1: List,
+    a2: List,
+    optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
+) -> (List, List) {
+    let a1_type_tag = type_tag(&a1);
+    let a2_type_tag = type_tag(&a2);
+    let a1_index = find_arithmetic_type_index(&a1_type_tag.to_string());
+    let a2_index = find_arithmetic_type_index(&a2_type_tag.to_string());
+    let get = move |args: List| optable("lookup").call(&args);
+    fn raise_helper(
+        x: &List,
+        index_diff: i32,
+        get: impl Fn(List) -> Option<List> + 'static + Clone,
+    ) -> List {
+        if index_diff <= 0 {
+            x.clone()
+        } else {
+            raise_helper(&raise(x, get.clone()), index_diff - 1, get)
+        }
+    }
+    let a1 = if a1_index < a2_index {
+        raise_helper(&a1, a2_index - a1_index, get.clone())
+    } else {
+        a1
+    };
+    let a2 = if a1_index > a2_index {
+        raise_helper(&a2, a1_index - a2_index, get.clone())
+    } else {
+        a2
+    };
+    (a1, a2)
+}
+
+pub fn drop(x: &List, optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> List {
+    let op_cloned = optable.clone();
+    let get = move |args: List| optable("lookup").call(&args);
+    let new_x = project(x, get.clone());
+    if raise(&new_x, get.clone()) == *x {
+        drop(&new_x, op_cloned)
+    } else {
+        x.clone()
+    }
+}
+pub fn apply_generic_drop_wrapper(
+    op: &List,
+    args: &List,
+    optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
+) -> Option<List> {
+    let op_cloned = optable.clone();
+    let get = move |args: List| optable("lookup").call(&args);
+    let (a1, a2) = (args.head(), args.tail().head());
+    let (a1, a2) = if is_arithmetic_type(&a1) && is_arithmetic_type(&a2) {
+        arithmetic_type_raise(a1.clone(), a2.clone(), op_cloned.clone())
+    } else {
+        (a1.clone(), a2.clone())
+    };
+    let res = apply_generic(op, &list![a1, a2], get);
+    if let Some(res) = res {
+        if is_arithmetic_type(&res) {
+            Some(drop(&res, op_cloned))
+        } else {
+            Some(res)
+        }
+    } else {
+        None
+    }
 }
