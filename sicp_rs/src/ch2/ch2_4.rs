@@ -1,4 +1,4 @@
-use crate::{prelude::*};
+use crate::prelude::*;
 
 use super::ch2_5::get_coercion;
 pub fn attach_tag(tag: &str, contents: &List) -> List {
@@ -20,6 +20,7 @@ pub fn type_tag(datum: &List) -> List {
         panic!("bad tagged datum -- TYPE-TAG")
     }
 }
+
 pub fn contents(datum: &List) -> List {
     // Only Support f64
     if datum.is_value() && datum.try_as_basis_value::<f64>().is_ok() {
@@ -68,6 +69,15 @@ pub fn apply_generic(
             }
             let a1 = args.head();
             let a2 = args.tail().head();
+
+            // if get_index(a1) != -1 && get_index(a2) != -1 {
+            //     //可提升的算术类型
+            //     //欠缺optable参数,修改签名会导致较多历史习题需要修改,暂时不实现
+            //     let (a1, a2) = arithmetic_type_raise(a1, a2, optable);
+
+            //     return apply_generic(&op_cloned, &list![a1, a2], get);
+            // }
+
             let t1_to_t2 = get_coercion(&type1, &type2, &coercion);
             let t2_to_t1 = get_coercion(&type2, &type1, &coercion);
             if t1_to_t2.is_some() {
@@ -88,4 +98,3 @@ pub fn apply_generic(
         }
     }
 }
-
