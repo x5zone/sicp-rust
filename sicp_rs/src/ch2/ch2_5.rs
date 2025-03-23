@@ -1,3 +1,4 @@
+use std::i32;
 use std::rc::Rc;
 
 use num::Integer;
@@ -6,12 +7,13 @@ use crate::ch2::ch2_4::{apply_generic, attach_tag, contents};
 use crate::prelude::*;
 
 use super::ch2_4::type_tag;
-const COMPLEX_ERROR_MESSAGE: &str = "complex only supports f64, please construct complex with f64";
-const JAVASCRIPT_NUMBER_ERROR_MESSAGE: &str =
+pub const COMPLEX_ERROR_MESSAGE: &str =
+    "complex only supports f64, please construct complex with f64";
+pub const JAVASCRIPT_NUMBER_ERROR_MESSAGE: &str =
     "javascript number only supports f64, please construct javascript number with f64";
-const JAVASCRIPT_INTEGER_ERROR_MESSAGE: &str =
+pub const JAVASCRIPT_INTEGER_ERROR_MESSAGE: &str =
     "javascript integer only supports i32, please construct javascript integer with i32";
-const RATIONAL_ERROR_MESSAGE: &str =
+pub const RATIONAL_ERROR_MESSAGE: &str =
     "rational only supports f64, please construct rational with f64";
 
 pub fn add(
@@ -129,7 +131,73 @@ pub fn install_arithmetic_raise_package(
     ]);
     Some("done".to_string().to_listv())
 }
-pub fn install_arithmetic_project_package(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> Option<List> {
+// 将浮点数转换为分数（分子和分母）
+// 使用连续分数法（Continued Fraction Method）
+// # 参数
+// - `x`: 待转换的浮点数
+// - `max_denominator`: 分母的最大值，用于限制精度
+// # 返回值
+// 返回一个元组 `(numerator, denominator)`，分别是分子和分母
+pub fn float_to_fraction(x: f64, max_denominator: i32) -> (i32, i32) {
+    // 如果输入为负数，先处理符号
+    let negative = x < 0.0; // 判断是否为负数
+    let mut x = x.abs(); // 如果是负数，取绝对值处理
+
+    // 初始化分子和分母
+    let mut numer0: i32 = 0; // 分子 numer_{-1}
+    let mut numer1: i32 = 1; // 分子 numer_0
+    let mut denom0: i32 = 1; // 分母 denom_{-1}
+    let mut denom1: i32 = 0; // 分母 denom_0
+
+    // 当前的整数部分
+    let mut a = x.floor() as i32; // 提取整数部分 \( a_0 = \lfloor x \rfloor \)
+
+    while denom1 < max_denominator {
+        // 更新分子和分母
+        // let numer2 = a * numer1 + numer0; // \( numer_{n+1} = a_n \cdot numer_n + numer_{n-1} \)
+        // let denom2 = a * denom1 + denom0; // \( denom_{n+1} = a_n \cdot denom_n + denom_{n-1} \)
+
+        // 检查乘法和加法是否会溢出
+        if let Some(numer2) = a.checked_mul(numer1).and_then(|v| v.checked_add(numer0)) {
+            if let Some(denom2) = a.checked_mul(denom1).and_then(|v| v.checked_add(denom0)) {
+                // 如果没有溢出，更新分子和分母
+                if denom2 > max_denominator {
+                    break;
+                }
+                numer0 = numer1;
+                numer1 = numer2;
+                denom0 = denom1;
+                denom1 = denom2;
+            } else {
+                // 如果分母计算溢出，终止计算
+                break;
+            }
+        } else {
+            // 如果分子计算溢出，终止计算
+            break;
+        }
+
+        // 更新小数部分
+        x = x - a as f64; // 计算小数部分
+        if x.abs().to_listv() == 0.0.to_listv() {
+            // 如果小数部分接近 0，停止迭代
+            break;
+        }
+
+        x = 1.0 / x; // \( x = \frac{1}{x} \)
+        a = x.floor() as i32; // 提取新的整数部分
+    }
+
+    // 如果是负数，调整符号
+    if negative {
+        (numer1 * -1, denom1)
+    } else {
+        (numer1, denom1)
+    }
+}
+pub fn install_arithmetic_project_package(
+    optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
+) -> Option<List> {
     let op_cloned = optable.clone();
     let get = move |args: List| optable("lookup").call(&args);
     let put = move |args: List| op_cloned("insert").call(&args);
@@ -151,21 +219,7 @@ pub fn install_arithmetic_project_package(optable: Rc<dyn Fn(&str) -> ClosureWra
         ClosureWrapper::new(move |args| {
             let real = args.head();
             let real = real.try_as_basis_value::<f64>().unwrap();
-            let (numer, denom) = if (real - real.round()).abs().to_listv() == 0.0.to_listv() {
-                // 小数部分等于0，是整数，直接返回
-                (real.round() as i32, 1)
-            } else {
-                let max = (1.0 / (real - real.round()).abs()).round() as f64;
-                if max == (1.0 / (real - real.round()).abs()) {
-                    //1.0除以小数部分，为整数
-                    ((max * real).round() as i32, max.round() as i32)
-                } else {
-                    let numer = (((i32::MAX as f64) / real).round() * real) as i32;
-                    let denom = ((i32::MAX as f64) / real).round() as i32;
-                    (numer, denom)
-                }
-            };
-
+            let (numer, denom) = float_to_fraction(*real, i32::MAX);
             Some(make_rational(
                 numer.to_listv(),
                 denom.to_listv(),
@@ -727,6 +781,30 @@ pub fn install_complex_packages(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> 
         "is_equal_to_zero",
         list!["complex"],
         is_equal_to_zero
+    ]);
+    let get_cloned = get.clone();
+    put(list![
+        "real_part",
+        list!["complex"],
+        ClosureWrapper::new(move |args: &List| Some(real_part(args, get_cloned.clone())))
+    ]);
+    let get_cloned = get.clone();
+    put(list![
+        "imag_part",
+        list!["complex"],
+        ClosureWrapper::new(move |args: &List| Some(imag_part(args, get_cloned.clone())))
+    ]);
+    let get_cloned = get.clone();
+    put(list![
+        "magnitude",
+        list!["complex"],
+        ClosureWrapper::new(move |args: &List| Some(magnitude(args, get_cloned.clone())))
+    ]);
+    let get_cloned = get.clone();
+    put(list![
+        "angle",
+        list!["complex"],
+        ClosureWrapper::new(move |args: &List| Some(angle(args, get_cloned.clone())))
     ]);
     put(list![
         "make_from_real_imag",

@@ -117,7 +117,7 @@ impl PartialEq for dyn ListV {
         } else if self.is_float() && other.is_float() {
             // Float comparison: Promote to `f64` for strict comparison.
             if let (Ok(a), Ok(b)) = (to_f64(self), to_f64(other)) {
-                const ABS_EPSILON: f64 = 100.0 * f64::EPSILON;
+                const ABS_EPSILON: f64 = f64::EPSILON;
                 let dynamic_epsilon = f64::EPSILON * a.abs().max(b.abs());
                 if (a - b).abs() < ABS_EPSILON || (a - b).abs() < dynamic_epsilon {
                     true
