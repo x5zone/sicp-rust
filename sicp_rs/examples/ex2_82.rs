@@ -1,17 +1,10 @@
-use std::rc::Rc;
-
-use sicp_rs::ch2::ch2_5::put_coercion;
-use sicp_rs::ch3::ch3_3::make_table_2d;
-use sicp_rs::prelude::*;
+use sicp_rs::{ch2::ch2_5::ArithmeticContext, prelude::*};
 fn test_transform() {
     // 创建函数表格
-    let func_table = make_table_2d();
-    let func_table_cloned = func_table.clone();
-    let put_func = move |args: List| func_table_cloned("insert").call(&args);
-
+    let mut arith = ArithmeticContext::new();
     // 定义多个函数签名[(type1,type5,type3),(type3,type4,type5),(type5,type5,type5)]
     {
-        put_func(list![
+        arith.put(
             "complex_func",
             list!["type1", "type5", "type3"],
             ClosureWrapper::new(move |args: &List| {
@@ -20,10 +13,10 @@ fn test_transform() {
                     args
                 );
                 Some(result.to_string().to_listv())
-            })
-        ]);
+            }),
+        );
 
-        put_func(list![
+        arith.put(
             "complex_func",
             list!["type3", "type4", "type5"],
             ClosureWrapper::new(move |args: &List| {
@@ -32,10 +25,10 @@ fn test_transform() {
                     args
                 );
                 Some(result.to_string().to_listv())
-            })
-        ]);
+            }),
+        );
 
-        put_func(list![
+        arith.put(
             "complex_func",
             list!["type5", "type5", "type5"],
             ClosureWrapper::new(move |args: &List| {
@@ -44,89 +37,80 @@ fn test_transform() {
                     args
                 );
                 Some(result.to_string().to_listv())
-            })
-        ]);
+            }),
+        );
     }
 
     // 创建类型强制表格[(type1->type2),(type2->type3),(type1->type4),(type4->type5),(type3->type5),(type1->type5),(type5->type2),(type1->type3)]
-    let mut coercion = List::Nil;
     {
-        coercion = put_coercion(
+        arith.put_coercion(
             &"type1".to_listv(),
             &"type2".to_listv(),
             ClosureWrapper::new(|args: &List| {
                 let value = args.head();
                 Some(format!("{} type1->type2", value).to_string().to_listv())
             }),
-            &coercion,
         );
 
-        coercion = put_coercion(
+        arith.put_coercion(
             &"type2".to_listv(),
             &"type3".to_listv(),
             ClosureWrapper::new(|args: &List| {
                 let value = args.head();
                 Some(format!("{} type2->type3", value).to_string().to_listv())
             }),
-            &coercion,
         );
 
-        coercion = put_coercion(
+        arith.put_coercion(
             &"type1".to_listv(),
             &"type4".to_listv(),
             ClosureWrapper::new(|args: &List| {
                 let value = args.head();
                 Some(format!("{} type1->type4", value).to_string().to_listv())
             }),
-            &coercion,
         );
 
-        coercion = put_coercion(
+        arith.put_coercion(
             &"type4".to_listv(),
             &"type5".to_listv(),
             ClosureWrapper::new(|args: &List| {
                 let value = args.head();
                 Some(format!("{} type4->type5", value).to_string().to_listv())
             }),
-            &coercion,
         );
 
-        coercion = put_coercion(
+        arith.put_coercion(
             &"type3".to_listv(),
             &"type5".to_listv(),
             ClosureWrapper::new(|args: &List| {
                 let value = args.head();
                 Some(format!("{} type3->type5", value).to_string().to_listv())
             }),
-            &coercion,
         );
 
-        coercion = put_coercion(
+        arith.put_coercion(
             &"type1".to_listv(),
             &"type5".to_listv(),
             ClosureWrapper::new(|args: &List| {
                 let value = args.head();
                 Some(format!("{} type1->type5", value).to_string().to_listv())
             }),
-            &coercion,
         );
-        coercion = put_coercion(
+        arith.put_coercion(
             &"type5".to_listv(),
             &"type2".to_listv(),
             ClosureWrapper::new(|args: &List| {
                 let value = args.head();
                 Some(format!("{} type5->type2", value).to_string().to_listv())
             }),
-            &coercion,
         );
-        coercion = put_coercion(
+        arith.put_coercion(
             &"type1".to_listv(),
             &"type3".to_listv(),
             ClosureWrapper::new(|args: &List| {
                 let value = args.head();
                 Some(format!("{} type1->type3", value).to_string().to_listv())
             }),
-            &coercion,
         );
     }
 
@@ -139,10 +123,10 @@ fn test_transform() {
 
     // 获取函数签名
     let func_name = "complex_func".to_string().to_listv();
-    let func_types = get_func_argtypes(&func_name, input_args.length(), func_table.clone());
+    let func_types = get_func_argtypes(&func_name, input_args.length(), &arith);
 
     // 执行参数转换
-    let (transformed_args, selected_func) = transform(&input_args, func_types, &coercion);
+    let (transformed_args, selected_func) = transform(&input_args, func_types, &arith);
 
     // 打印结果
     if let (Some(args), Some(func)) = (transformed_args, selected_func) {
@@ -158,7 +142,11 @@ fn test_transform() {
     }
 }
 // 处理所有函数签名，并返回成本最低的转换结果。
-fn transform(input_args: &List, func_types: List, coercion: &List) -> (Option<List>, Option<List>) {
+fn transform(
+    input_args: &List,
+    func_types: List,
+    arith: &ArithmeticContext,
+) -> (Option<List>, Option<List>) {
     let mut min_cost = i32::MAX;
     let mut best_results = None;
     let mut best_func = None;
@@ -168,7 +156,8 @@ fn transform(input_args: &List, func_types: List, coercion: &List) -> (Option<Li
         let fun = func_types.head();
 
         let func = fun.tail();
-        let (cost, flag, results) = transform_argtypes(&input_args, fun, &coercion, List::Nil, 0);
+        let (cost, flag, results) =
+            transform_argtypes(&input_args, fun, &arith.coercion, List::Nil, 0);
         if flag == true && cost < min_cost {
             min_cost = cost;
             println!("min arg tranforms: {}", min_cost);
@@ -271,12 +260,9 @@ fn transform_argtypes(
     }
 }
 // 获取函数的所有可能参数类型列表
-fn get_func_argtypes(
-    func_name: &List,
-    args_len: usize,
-    func_map: Rc<dyn Fn(&str) -> ClosureWrapper>,
-) -> List {
-    let assoc = move |args: List| func_map("assoc").call(&args);
+fn get_func_argtypes(func_name: &List, args_len: usize, arith: &ArithmeticContext) -> List {
+    let optable = arith.optable.clone();
+    let assoc = move |args: List| optable("assoc").call(&args);
     let args = assoc(list![func_name.clone()]);
     let msg = format!("get_func_argtypes: func_name {} not found", func_name);
     args.expect(&msg)
@@ -303,68 +289,65 @@ fn main() {
     test_transform()
 }
 fn _test_get_func_argtypes() {
-    let optable = make_table_2d();
+    let arith = ArithmeticContext::new();
 
-    let op_cloned = optable.clone();
-    let put = move |args: List| op_cloned("insert").call(&args);
-    put(list![
+    arith.put(
         "some_func",
         list!["type1", "type2", "type3"],
         ClosureWrapper::new(move |_: &List| {
             Some("some_func(type1,type2,type3)".to_string().to_listv())
-        })
-    ]);
-    put(list![
+        }),
+    );
+    arith.put(
         "some_func",
         list!["type1", "type2", "type3", "type4"],
         ClosureWrapper::new(move |_: &List| {
             Some("some_func(type1,type2,type3,type4)".to_string().to_listv())
-        })
-    ]);
-    put(list![
+        }),
+    );
+    arith.put(
         "some_func",
         list!["type2", "type5", "type4"],
         ClosureWrapper::new(move |_: &List| {
             Some("some_func(type2,type5,type4)".to_string().to_listv())
-        })
-    ]);
+        }),
+    );
     println!(
         "{}",
-        get_func_argtypes(&"some_func".to_string().to_listv(), 3, optable.clone())
+        get_func_argtypes(&"some_func".to_string().to_listv(), 3, &arith)
     )
     //((("type2", ("type5", ("type4", Nil))), A closure wrapped in ClosureWrapper), ((("type1", ("type2", ("type3", Nil))), A closure wrapped in ClosureWrapper), Nil))
 }
 fn _test_get_type_coercion() {
-    let coercion = put_coercion(
+    let mut arith = ArithmeticContext::new();
+    arith.put_coercion(
         &"type1".to_listv(),
         &"type2".to_listv(),
         ClosureWrapper::new(|_| Some("type1 to type2".to_string().to_listv())),
-        &List::Nil,
     );
-    let coercion = put_coercion(
+    arith.put_coercion(
         &"type2".to_listv(),
         &"type3".to_listv(),
         ClosureWrapper::new(|_| Some("type2 to type3".to_string().to_listv())),
-        &coercion,
     );
-    let coercion = put_coercion(
+    arith.put_coercion(
         &"type1".to_listv(),
         &"type4".to_listv(),
         ClosureWrapper::new(|_| Some("type1 to type4".to_string().to_listv())),
-        &coercion,
     );
-    let coercion = put_coercion(
+    arith.put_coercion(
         &"type2".to_listv(),
         &"type5".to_listv(),
         ClosureWrapper::new(|_| Some("type2 to type5".to_string().to_listv())),
-        &coercion,
     );
-    let coercion = put_coercion(
+    arith.put_coercion(
         &"type4".to_listv(),
         &"type5".to_listv(),
         ClosureWrapper::new(|_| Some("type4 to type5".to_string().to_listv())),
-        &coercion,
     );
-    println!("{}", get_type_coercion(&"type1".to_listv(), &coercion))
+    println!(
+        "{}",
+        get_type_coercion(&"type1".to_listv(), &arith.coercion.clone())
+    )
     //(("type4", (A closure wrapped in ClosureWrapper, Nil)), (("type2", (A closure wrapped in ClosureWrapper, Nil)), Nil))
 }

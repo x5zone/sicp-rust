@@ -1,123 +1,133 @@
-use std::rc::Rc;
+use sicp_rs::ch2::ch2_5::ArithmeticContext;
+use sicp_rs::ch2::ch2_5::{attach_tag, contents, type_tag};
 
-use sicp_rs::ch2::ch2_4::{attach_tag, contents, type_tag};
-use sicp_rs::ch3::ch3_3::make_table_2d;
 use sicp_rs::prelude::*;
 // 通用型操作：根据操作符和参数调用对应的函数
-fn apply_generic(
-    op: &List,
-    args: &List,
-    get: impl Fn(List) -> Option<List> + 'static,
-) -> Option<List> {
+fn apply_generic(op: &List, args: &List, arith: &ArithmeticContext) -> Option<List> {
     let args = if args.head().is_pair() && args.head().head().is_pair() {
         // 处理可能由于apply_generic导致的嵌套列表
         args.flatmap(|x| x.clone())
     } else {
         args.clone()
     };
-    let op_cloned = op.clone();
-    println!("apply generic op:{}, args:{}", op_cloned, args);
+    println!("apply generic op:{}, args:{}", op, args);
     let type_tags = args.map(|x| type_tag(x));
-    let op = get(list![op.clone(), type_tags]);
-    if let Some(op) = op {
-        if let Ok(op) = op.try_as_basis_value::<ClosureWrapper>() {
-            return op.call(&args.map(|x| contents(x)));
-        }
+    if let Some(op) = arith.get(list![op.clone(), type_tags]) {
+        op.call(&args.map(|x| contents(x)))
+    } else {
+        panic!(
+            "apply_generic no method for these types op:{}, args:{}",
+            op, args
+        )
     }
-    panic!("No method for these types op:{}, args:{}", op_cloned, args);
 }
-fn magnitude(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
+fn real_part(z: &List, arith: &ArithmeticContext) -> List {
+    apply_generic(&"real_part".to_listv(), &list![z.clone()], arith).unwrap()
+}
+fn imag_part(z: &List, arith: &ArithmeticContext) -> List {
+    apply_generic(&"imag_part".to_listv(), &list![z.clone()], arith).unwrap()
+}
+fn magnitude(z: &List, arith: &ArithmeticContext) -> List {
     println!("magnitude {}", z);
-    apply_generic(&"magnitude".to_listv(), &list![z.clone()], get).unwrap()
+    apply_generic(&"magnitude".to_listv(), &list![z.clone()], arith).unwrap()
 }
-fn install_rectangular_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
-    let real_part = ClosureWrapper::new(move |x: &List| Some(x.head().head()));
-
-    let imag_part = ClosureWrapper::new(move |x: &List| Some(x.head().tail()));
-
-    let (real_cloned, imag_cloned) = (real_part.clone(), imag_part.clone());
-    let magnitude = ClosureWrapper::new(move |x: &List| {
-        println!("rectangular magnitude {}", x);
-        let rp_list = real_cloned.call(x).unwrap();
-        let rp = rp_list.try_as_basis_value::<f64>().unwrap();
-        let ip_list = imag_cloned.call(x).unwrap();
-        let ip = ip_list.try_as_basis_value::<f64>().unwrap();
-        Some((rp * rp + ip * ip).sqrt().to_listv())
+fn install_rectangular_package(arith: &ArithmeticContext) -> Option<List> {
+    let tag = |x: &List| attach_tag("rectangular", x);
+    arith.put("make_from_real_imag", list!["rectangular"], {
+        let tag = tag.clone();
+        ClosureWrapper::new(move |args| {
+            let (x, y) = (args.head(), args.tail().head());
+            Some(tag(&pair!(x, y)))
+        })
+    });
+    arith.put("real_part", list!["rectangular"], {
+        ClosureWrapper::new(move |args| Some(args.head().head()))
+    });
+    arith.put("imag_part", list!["rectangular"], {
+        ClosureWrapper::new(move |args| Some(args.head().tail()))
     });
 
-    let make_from_real_imag = |x: List, y: List| pair![x, y];
-    let tag = |x| attach_tag("rectangular", &x);
-    // 注意安装操作符时，若action为具体的运算，则key2为list!包裹，list中为所有参与运算的参数的类型
-    put(list!["real_part", list!["rectangular"], real_part]);
-    put(list!["imag_part", list!["rectangular"], imag_part]);
-    put(list!["magnitude", list!["rectangular"], magnitude]);
-    // 注意安装操作符时，若action为make，则key2为单值，值为具体的类型名称
-    put(list![
-        "make_from_real_imag",
-        "rectangular",
-        ClosureWrapper::new(move |args: &List| {
-            let x = args.head();
-            let y = args.tail().head();
-            Some(tag(make_from_real_imag(x, y)))
-        })
-    ]);
-    Some("done".to_string().to_listv())
-}
-
-fn install_polar_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
-    let magnitude = ClosureWrapper::new(move |x: &List| Some(contents(x).head()));
-    put(list!["magnitude", list!["polar"], magnitude]);
-    Some("done".to_string().to_listv())
-}
-fn install_complex_packages(
-    get: impl Fn(List) -> Option<List> + 'static,
-    put: impl Fn(List) -> Option<List> + 'static,
-) -> Option<List> {
-    let make_from_real_imag = move |x: List, y: List| {
-        get(list!["make_from_real_imag", "rectangular"])
-            .unwrap()
-            .try_as_basis_value::<ClosureWrapper>()
-            .unwrap()
-            .call(&list![x, y])
-            .unwrap()
+    let extract_real_imag = {
+        let arith = arith.clone();
+        let tag = tag.clone();
+        move |arg: &List| {
+            // 使用 tag 函数重新附加数据类型标签：
+            // apply_generic 在处理参数时会移除类型标签，
+            // 这里通过 tag 函数重新为参数附加类型标签，以便后续操作能够识别数据类型。
+            let args = tag(arg);
+            let (real_x, imag_x) = (real_part(&args, &arith), imag_part(&args, &arith));
+            (real_x, imag_x)
+        }
     };
-    let tag = |x| attach_tag("complex", &x);
-    let tag_cloned = tag.clone();
-    put(list![
-        "make_from_real_imag",
-        "complex",
-        ClosureWrapper::new(move |args: &List| {
-            let x = args.head();
-            let y = args.tail().head();
-            Some(tag_cloned(make_from_real_imag(x.clone(), y.clone())))
+    arith.put("magnitude", list!["rectangular"], {
+        let extract = extract_real_imag.clone();
+        ClosureWrapper::new(move |args| {
+            let (real, imag) = extract(&args.head());
+            if real.is_float_value() && imag.is_float_value() {
+                let r = real.try_as_basis_value::<f64>().unwrap();
+                let i = imag.try_as_basis_value::<f64>().unwrap();
+                Some((r * r + i * i).sqrt().to_listv())
+            } else {
+                panic!("Now only support f64")
+            }
         })
-    ]);
+    });
+    Some("done".to_string().to_listv())
+}
+
+fn install_complex_package(arith: &ArithmeticContext) -> Option<List> {
+    let tag = |x| attach_tag("complex", &x);
+    arith.put("make_from_real_imag", list!["complex"], {
+        let tag = tag.clone();
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let (x, y) = (args.head(), args.tail().head());
+            if let Some(complex) = arith
+                .get(list!["make_from_real_imag", list!["rectangular"]])
+                .expect("make_from_real_imag rectangular failed get func")
+                .call(&list![x.clone(), y.clone()])
+            {
+                Some(tag(complex))
+            } else {
+                panic!("make_from_real_imag rectangular failed for args:{}", args)
+            }
+        })
+    });
 
     Some("done".to_string().to_listv())
 }
-fn make_complex_from_real_imag(x: List, y: List, get: impl Fn(List) -> Option<List>) -> List {
-    get(list!["make_from_real_imag", "complex"])
-        .unwrap()
-        .try_as_basis_value::<ClosureWrapper>()
-        .unwrap()
-        .call(&list![x, y])
-        .unwrap()
+fn make_complex_from_real_imag(x: List, y: List, arith: &ArithmeticContext) -> List {
+    if let Some(complex) = arith
+        .get(list!["make_from_real_imag", list!["complex"]])
+        .expect("make_complex_from_real_imag: arith.get(list![\"make_from_real_imag\", list![\"complex\"]]) failed])")
+        .call(&list![x.clone(), y.clone()])
+    {
+        complex
+    } else {
+        panic!("make_complex_from_real_imag failed for x:{}, y:{}", x, y)
+    }
 }
 
 fn main() {
-    // 创建操作符表
-    let optable: Rc<dyn Fn(&str) -> ClosureWrapper> = make_table_2d();
-    let op_cloned = optable.clone();
-    let get = move |args: List| optable("lookup").call(&args);
-    let put = move |args: List| op_cloned("insert").call(&args);
-    println!("{:?}", install_rectangular_package(put.clone()));
-    println!("{:?}", install_polar_package(put.clone()));
-    println!("{:?}", install_complex_packages(get.clone(), put.clone()));
-    let a = make_complex_from_real_imag(3.0.to_listv(), 4.0.to_listv(), get.clone());
+    // 创建通用算术包上下文
+    let arith = ArithmeticContext::new();
+
+    println!("{:?}", install_rectangular_package(&arith));
+    println!("{:?}", install_complex_package(&arith));
+    let a = make_complex_from_real_imag(3.0.to_listv(), 4.0.to_listv(), &arith);
     println!("{}", a);
-    let get_cloned = get.clone();
-    let magnitude_wrapper =
-        ClosureWrapper::new(move |x: &List| Some(magnitude(x, get_cloned.clone())));
-    put(list!["magnitude", list!["complex"], magnitude_wrapper]);
-    println!("{}", magnitude(&a, get.clone()))
+
+    if true {
+        let magnitude_wrapper = ClosureWrapper::new({
+            let arith = arith.clone();
+            move |x: &List| Some(magnitude(x, &arith))
+        });
+        arith.put("magnitude", list!["complex"], magnitude_wrapper);
+    } else {
+        println!(
+            "apply_generic no method for these types op:magnitude, args:((complex, (rectangular, (3.0, 4.0))), Nil)"
+        )
+    }
+
+    println!("{}", magnitude(&a, &arith))
 }

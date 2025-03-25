@@ -1,13 +1,9 @@
-use sicp_rs::ch2::ch2_5::*;
-use sicp_rs::ch3::ch3_3::make_table_2d;
-use sicp_rs::prelude::*;
+use sicp_rs::ch2::ch2_5::{ArithmeticContext, install_float_package, make_float};
 fn main() {
-    // 创建操作符表
-    let optable = make_table_2d();
-    let op_cloned = optable.clone();
-    let get = move |args: List| optable("lookup").call(&args);
-    let put = move |args: List| op_cloned("insert").call(&args);
+    // 创建通用算术包上下文
+    let arith = ArithmeticContext::new();
+    install_float_package(&arith);
 
-    install_javascript_number_package(put.clone());
-    println!("{}", add(&1.0.to_listv(), &2.0.to_listv(), get, &List::Nil));
+    let (x, y) = (make_float(1.0, &arith), make_float(2.0, &arith));
+    println!("{} + {} = {}", x, y, arith.add(&x, &y));
 }

@@ -1,134 +1,790 @@
-use std::i32;
 use std::rc::Rc;
+use std::{fmt, i32};
 
-use num::Integer;
+use num::{Integer, Num};
 
-use crate::ch2::ch2_4::{apply_generic, attach_tag, contents};
+use crate::ch3::ch3_3::make_table_2d;
 use crate::prelude::*;
 
-use super::ch2_4::type_tag;
-pub const COMPLEX_ERROR_MESSAGE: &str =
-    "complex only supports f64, please construct complex with f64";
-pub const JAVASCRIPT_NUMBER_ERROR_MESSAGE: &str =
-    "javascript number only supports f64, please construct javascript number with f64";
-pub const JAVASCRIPT_INTEGER_ERROR_MESSAGE: &str =
-    "javascript integer only supports i32, please construct javascript integer with i32";
-pub const RATIONAL_ERROR_MESSAGE: &str =
-    "rational only supports f64, please construct rational with f64";
+pub fn attach_tag(tag: &str, contents: &List) -> List {
+    //Only Support f64&i32
+    if contents.is_value()
+        && (contents.try_as_basis_value::<f64>().is_ok()
+            || contents.try_as_basis_value::<i32>().is_ok())
+    {
+        return contents.clone();
+    };
+    pair!(tag.to_string(), contents.clone())
+}
 
-pub fn add(
-    x: &List,
-    y: &List,
-    get: impl Fn(List) -> Option<List> + 'static,
-    coercion: &List,
+pub fn type_tag(datum: &List) -> List {
+    // Only Support f64&i32
+    if datum.is_value() && datum.try_as_basis_value::<f64>().is_ok() {
+        "float".to_listv()
+    } else if datum.is_value() && datum.try_as_basis_value::<i32>().is_ok() {
+        "integer".to_listv()
+    } else if datum.is_pair() {
+        datum.head()
+    } else {
+        panic!("bad tagged datum -- TYPE-TAG")
+    }
+}
+
+pub fn contents(datum: &List) -> List {
+    // Only Support f64&i32
+    if datum.is_value()
+        && (datum.try_as_basis_value::<f64>().is_ok() || datum.try_as_basis_value::<i32>().is_ok())
+    {
+        datum.clone()
+    } else if datum.is_pair() {
+        datum.tail()
+    } else {
+        panic!("bad tagged datum -- CONTENTS")
+    }
+}
+pub fn apply_generic(op: &List, args: &List, arith: &ArithmeticContext) -> Option<List> {
+    let args = if args.head().is_pair() && args.head().head().is_pair() {
+        // 处理可能由于apply_generic导致的嵌套列表
+        args.flatmap(|x| x.clone())
+    } else {
+        args.clone()
+    };
+
+    let type_tags = args.map(|x| type_tag(x));
+    let func = arith.get(list![op.clone(), type_tags.clone()]);
+    if let Some(func) = func {
+        // 找到对应函数签名，直接调用
+        func.call(&args.map(|x| contents(x)))
+    } else {
+        if args.length() != 2 {
+            panic!("apply_generic expects 2 args, got {} with op {}", args, op);
+        }
+
+        let type1 = type_tags.head();
+        let type2 = type_tags.tail().head();
+        assert_ne!(type1, type2, "no method found for op:{}, args:{}", op, args);
+        let a1 = args.head();
+        let a2 = args.tail().head();
+
+        //可提升的算术类型
+        if find_arithmetic_type_index(&type1.to_string()) != -1
+            && find_arithmetic_type_index(&type2.to_string()) != -1
+        {
+            let (a1, a2) = unify_arithmetic_types(a1, a2, arith);
+            return apply_generic(op, &list![a1, a2], arith);
+        }
+
+        // 类型强制
+        let try_coerce_and_apply = |t1: &List, t2: &List, a1: &List, a2: &List, direction: i32| {
+            if let Some(t1_to_t2) = arith.get_coercion(t1, t2) {
+                let coerce = |x: &List| {
+                    t1_to_t2
+                        .call(&list![x.clone()])
+                        .expect(&format!("{} to {} coercion failed", t1, t2))
+                };
+                let (a1, a2) = match direction {
+                    1 => (coerce(a1), a2.clone()),
+                    2 => (a1.clone(), coerce(a2)),
+                    _ => unreachable!("coerce direction only support 1:t1_to_t2 and 2:t2_to_t1"),
+                };
+                apply_generic(op, &list![a1, a2], arith)
+            } else {
+                None
+            }
+        };
+        if let Some(result) = try_coerce_and_apply(&type1, &type2, &a1, &a2, 1)
+            .or_else(|| try_coerce_and_apply(&type2, &type1, &a1, &a2, 2))
+        {
+            Some(result)
+        } else {
+            panic!("No method for these types op:{}, args:{}", op, args);
+        }
+    }
+}
+
+pub fn install_arithmetic_package(arith: &ArithmeticContext) -> Option<List> {
+    install_integer_package(&arith);
+    install_float_package(&arith);
+    install_rational_package(&arith);
+    install_polar_package(&arith);
+    install_rectangular_package(&arith);
+    install_complex_package(&arith);
+    Some("done".to_string().to_listv())
+}
+
+const ARITHMETIC_TYPES: [&str; 4] = ["integer", "rational", "float", "complex"];
+
+pub fn find_arithmetic_type_index(type_tag: &str) -> i32 {
+    for (i, t) in ARITHMETIC_TYPES.iter().enumerate() {
+        if type_tag == *t {
+            return i as i32;
+        }
+    }
+    -1
+}
+pub fn is_basis_arithmetic_type(x: &List) -> bool {
+    find_arithmetic_type_index(&type_tag(x).to_string()) >= 0
+}
+// 将两个值的类型提升到统一的类型。
+pub fn unify_arithmetic_types(a1: List, a2: List, arith: &ArithmeticContext) -> (List, List) {
+    let a1_index = find_arithmetic_type_index(&type_tag(&a1).to_string());
+    let a2_index = find_arithmetic_type_index(&type_tag(&a2).to_string());
+    fn type_raise(x: &List, index_diff: i32, arith: &ArithmeticContext) -> List {
+        if index_diff <= 0 {
+            x.clone()
+        } else {
+            type_raise(&arith.raise(x), index_diff - 1, arith)
+        }
+    }
+    let a1 = if a1_index < a2_index {
+        type_raise(&a1, a2_index - a1_index, arith)
+    } else {
+        a1
+    };
+    let a2 = if a1_index > a2_index {
+        type_raise(&a2, a1_index - a2_index, arith)
+    } else {
+        a2
+    };
+    (a1, a2)
+}
+
+#[derive(Clone)]
+pub struct ArithmeticContext {
+    // 这是所有的操作函数的表格
+    pub optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
+    // 这是类型转换的表格
+    pub coercion: List,
+}
+macro_rules! define_methods {
+    ($($fn_name:ident, $op_name:expr, 2);* $(;)?) => {
+        $(
+            pub fn $fn_name(&self, x: &List, y: &List) -> List {
+                self.apply_generic($op_name, &list![x.clone(), y.clone()]).unwrap()
+            }
+        )*
+    };
+    ($($fn_name:ident, $op_name:expr, 1);* $(;)?) => {
+        $(
+            pub fn $fn_name(&self, x: &List) -> List {
+                self.apply_generic($op_name, &list![x.clone()]).unwrap()
+            }
+        )*
+    };
+}
+impl ArithmeticContext {
+    pub fn new() -> Self {
+        ArithmeticContext {
+            optable: make_table_2d(),
+            coercion: List::Nil,
+        }
+    }
+    pub fn get(&self, keys: List) -> Option<ClosureWrapper> {
+        let lookup = (self.optable)("lookup");
+        if let Some(closure) = lookup.call(&keys) {
+            if let Ok(closure) = closure.try_as_basis_value::<ClosureWrapper>() {
+                Some(closure.clone())
+            } else {
+                eprintln!(
+                    "ArithmeticContext get failed! try_into_Closure failed for keys:{}",
+                    keys
+                );
+                None
+            }
+        } else {
+            None
+        }
+    }
+    pub fn put(&self, key1: &'static str, key2: List, closure: ClosureWrapper) {
+        let insert = (self.optable)("insert");
+        if insert
+            .call(&list![key1.to_listv(), key2.clone(), closure])
+            .is_none()
+        {
+            panic!(
+                "ArithmeticContext put failed! insert closure failed for keys:{}",
+                list![key1, key2]
+            )
+        }
+    }
+
+    define_methods! {
+        add, "add", 2;
+        sub, "sub", 2;
+        mul, "mul", 2;
+        div, "div", 2;
+        is_equal, "is_equal", 2;
+    }
+
+    define_methods! {
+        is_equal_to_zero, "is_equal_to_zero", 1;
+        negative, "negative", 1;
+        abs, "abs", 1;
+        numer, "numer", 1;
+        denom, "denom", 1;
+        real_part, "real_part", 1;
+        imag_part, "imag_part", 1;
+        magnitude, "magnitude", 1;
+        angle, "angle", 1;
+    }
+    pub fn raise(&self, x: &List) -> List {
+        // only raise for basis arith type and if x is not a complex number
+        if !is_basis_arithmetic_type(x) || type_tag(x) == "complex".to_listv() {
+            x.clone()
+        } else {
+            self.apply_generic(&"raise", &list![x.clone()]).unwrap()
+        }
+    }
+    pub fn project(&self, x: &List) -> List {
+        // only project for basis arith type and if x is not an integer
+        if !is_basis_arithmetic_type(x) || type_tag(x) == "integer".to_listv() {
+            x.clone()
+        } else {
+            self.apply_generic(&"project", &list![x.clone()]).unwrap()
+        }
+    }
+    pub fn sqrt(&self, x: &List) -> List {
+        assert!(
+            is_basis_arithmetic_type(x) && type_tag(x) != "complex".to_listv(),
+            "sqrt only for (integer, rational, float)"
+        );
+        self.apply_generic(&"sqrt", &list![x.clone()]).unwrap()
+    }
+    pub fn drop(&self, x: &List) -> List {
+        // integer类型已无法继续drop
+        self.drop_to_type(x, "integer".to_string())
+    }
+    pub fn drop_to_type(&self, x: &List, target_type: String) -> List {
+        if type_tag(x) == target_type.clone().to_listv() || type_tag(x) == "integer".to_listv() {
+            return x.clone();
+        };
+        let new_x = self.project(x);
+        if self.is_equal(&self.raise(&new_x), &x) == true.to_listv() {
+            self.drop_to_type(&new_x, target_type)
+        } else {
+            // 可能不是target_type，已无法继续drop
+            x.clone()
+        }
+    }
+    // coercion support
+    pub fn put_coercion(
+        &mut self,
+        type1: &List,
+        type2: &List,
+        proc: ClosureWrapper,
+    ) -> Option<List> {
+        if self.get_coercion(type1, type2).is_none() {
+            self.coercion = pair![
+                list![type1.clone(), type2.clone(), proc],
+                self.coercion.clone()
+            ]
+        }
+        Some("done".to_listv())
+    }
+    pub fn get_coercion(&self, type1: &List, type2: &List) -> Option<ClosureWrapper> {
+        fn get_type1(list_item: &List) -> List {
+            list_item.head()
+        }
+        fn get_type2(list_item: &List) -> List {
+            list_item.tail().head()
+        }
+        fn get_proc(list_item: &List) -> List {
+            list_item.tail().tail().head()
+        }
+        fn get_coercion_iter(type1: &List, type2: &List, items: &List) -> Option<ClosureWrapper> {
+            if items.is_empty() {
+                None
+            } else {
+                let top = items.head();
+
+                if get_type1(&top) == *type1 && get_type2(&top) == *type2 {
+                    if let Ok(proc) = get_proc(&top).try_as_basis_value::<ClosureWrapper>() {
+                        Some(proc.clone())
+                    } else {
+                        eprintln!(
+                            "get_coercion_iter failed! try_into_Closure failed for keys:{}",
+                            top
+                        );
+                        None
+                    }
+                } else {
+                    get_coercion_iter(type1, type2, &items.tail())
+                }
+            }
+        }
+        get_coercion_iter(type1, type2, &self.coercion)
+    }
+    pub fn apply_generic(&self, op: &'static str, args: &List) -> Option<List> {
+        apply_generic(&op.to_listv(), args, self)
+    }
+}
+
+pub fn make_integer(x: i32, arith: &ArithmeticContext) -> List {
+    if let Some(integer) = arith
+        .get(list!["make", list!["integer"]])
+        .expect("make_integer: arith.get(list![\"make\", list![\"integer\"]]) failed])")
+        .call(&list![x])
+    {
+        integer
+    } else {
+        panic!("make_integer failed for x:{}", x)
+    }
+}
+pub fn make_float(x: f64, arith: &ArithmeticContext) -> List {
+    if let Some(float) = arith
+        .get(list!["make", list!["float"]])
+        .expect("make_float: arith.get(list![\"make\", list![\"float\"]]) failed])])")
+        .call(&list![x])
+    {
+        float
+    } else {
+        panic!("make_float failed for x:{}", x)
+    }
+}
+pub fn make_rational(n: List, d: List, arith: &ArithmeticContext) -> List {
+    if let Some(rational) = arith
+        .get(list!["make", list!["rational"]])
+        .expect("make_rational: arith.get(list![\"make\", list![\"rational\"]]) failed])])])")
+        .call(&list![n.clone(), d.clone()])
+    {
+        rational
+    } else {
+        panic!("make_rational failed for n:{}, d:{}", n, d)
+    }
+}
+pub fn make_complex_from_real_imag(x: List, y: List, arith: &ArithmeticContext) -> List {
+    if let Some(complex) = arith
+        .get(list!["make_from_real_imag", list!["complex"]])
+        .expect("make_complex_from_real_imag: arith.get(list![\"make_from_real_imag\", list![\"complex\"]]) failed])")
+        .call(&list![x.clone(), y.clone()])
+    {
+        complex
+    } else {
+        panic!("make_complex_from_real_imag failed for x:{}, y:{}", x, y)
+    }
+}
+pub fn make_complex_from_mag_ang(r: List, a: List, arith: &ArithmeticContext) -> List {
+    if let Some(complex) = arith
+        .get(list!["make_from_mag_ang", list!["complex"]])
+        .expect("make_complex_from_mag_ang: arith.get(list![\"make_from_mag_ang\", list![\"complex\"]]) failed])").call(&list![r.clone(), a.clone()])
+    {
+        complex
+    } else {
+        panic!("make_complex_from_mag_ang failed for r:{}, a:{}", r, a)
+    }
+}
+pub fn make_polynomial_from_sparse(
+    variable: &List,
+    term_list: &List,
+    arith: &ArithmeticContext,
 ) -> List {
-    if coercion.is_empty() {
-        apply_generic(&"add".to_listv(), &list![x.clone(), y.clone()], get).unwrap()
+    if let Some(polynomial) = arith
+        .get(list!["make_polynomial_from_sparse", list!["polynomial"]])
+        .expect("make_polynomial_from_sparse: arith.get(list![\"make\", list![\"polynomial\"]]) failed])")
+        .call(&list![variable.clone(), term_list.clone()])
+    {
+        polynomial
     } else {
-        apply_generic(
-            &pair![list!["coercion", coercion.clone()], "add"],
-            &list![x.clone(), y.clone()],
-            get,
-        )
-        .unwrap()
+        panic!("make_polynomial_from_sparse failed for variable:{}, term_list:{}", variable,term_list)
     }
 }
-pub fn sub(x: &List, y: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"sub".to_listv(), &list![x.clone(), y.clone()], get).unwrap()
-}
-pub fn mul(x: &List, y: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"mul".to_listv(), &list![x.clone(), y.clone()], get).unwrap()
-}
-pub fn div(x: &List, y: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"div".to_listv(), &list![x.clone(), y.clone()], get).unwrap()
-}
-pub fn real_part(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"real_part".to_listv(), &list![z.clone()], get).unwrap()
-}
-pub fn imag_part(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"imag_part".to_listv(), &list![z.clone()], get).unwrap()
-}
-pub fn numer(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"numer".to_listv(), &list![z.clone()], get).unwrap()
-}
-pub fn denom(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"denom".to_listv(), &list![z.clone()], get).unwrap()
-}
-pub fn magnitude(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"magnitude".to_listv(), &list![z.clone()], get).unwrap()
-}
-pub fn angle(z: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"angle".to_listv(), &list![z.clone()], get).unwrap()
-}
-pub fn is_equal(x: &List, y: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"equal".to_listv(), &list![x.clone(), y.clone()], get).unwrap()
-}
-pub fn is_equal_to_zero(x: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    apply_generic(&"is_equal_to_zero".to_listv(), &list![x.clone()], get).unwrap()
-}
-pub fn raise(x: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    if !is_arithmetic_type(x) || type_tag(x) == "complex".to_listv() {
-        x.clone()
-    } else {
-        apply_generic(&"raise".to_listv(), &list![x.clone()], get).unwrap()
-    }
-}
-pub fn project(x: &List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    if !is_arithmetic_type(x) || type_tag(x) == "integer".to_listv() {
-        x.clone()
-    } else {
-        apply_generic(&"project".to_listv(), &list![x.clone()], get).unwrap()
-    }
-}
+fn install_binary_op<T: fmt::Debug + Clone + 'static>(
+    op_name: &'static str,
+    tag_name: &'static str,
+    op: impl Fn(T, T) -> List + 'static,
+    arith: &ArithmeticContext,
+) {
+    let get_value = move |x: &List| {
+        x.try_as_basis_value::<T>()
+            .expect(&format!(
+                "{} only supports {}, please construct {} with the correct type",
+                tag_name,
+                std::any::type_name::<T>(),
+                tag_name
+            ))
+            .clone()
+    };
 
-pub fn install_arithmetic_raise_package(
-    optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
+    arith.put(
+        op_name,
+        list![tag_name, tag_name],
+        ClosureWrapper::new(move |args: &List| {
+            let (x, y) = (get_value(&args.head()), get_value(&args.tail().head()));
+            Some(op(x, y))
+        }),
+    );
+}
+fn install_unary_op<T: fmt::Debug + Clone + 'static>(
+    op_name: &'static str,
+    tag_name: &'static str,
+    op: impl Fn(T) -> List + 'static,
+    arith: &ArithmeticContext,
+) {
+    let get_value = move |x: &List| {
+        x.try_as_basis_value::<T>()
+            .expect(&format!(
+                "{} only supports {}, please construct {} with the correct type",
+                tag_name,
+                std::any::type_name::<T>(),
+                tag_name
+            ))
+            .clone()
+    };
+    arith.put(
+        op_name,
+        list![tag_name],
+        ClosureWrapper::new(move |args: &List| {
+            let x = get_value(&args.head());
+            Some(op(x))
+        }),
+    )
+}
+pub fn install_basic_numeric_type<T: fmt::Debug + Copy + Num + PartialOrd + 'static>(
+    tag_name: &'static str,
+    make_value: impl Fn(T) -> List + Clone + 'static,
+    arith: &ArithmeticContext,
 ) -> Option<List> {
-    let op_cloned = optable.clone();
-    let get = move |args: List| optable("lookup").call(&args);
-    let put = move |args: List| op_cloned("insert").call(&args);
-    let get_cloned = get.clone();
-    put(list![
-        "raise",
-        list!["integer"],
-        ClosureWrapper::new(move |args| {
-            Some(make_rational(args.head(), 1.to_listv(), get_cloned.clone()))
-        })
-    ]);
-    let get_cloned = get.clone();
-    put(list![
-        "raise",
-        list!["rational"],
-        ClosureWrapper::new(move |args| {
-            let (numer_x, denom_x) = (args.head().head(), args.head().tail());
-            let (numer_x, denom_x) = (
-                numer_x
-                    .try_as_basis_value::<i32>()
-                    .expect(RATIONAL_ERROR_MESSAGE),
-                denom_x
-                    .try_as_basis_value::<i32>()
-                    .expect(RATIONAL_ERROR_MESSAGE),
-            );
-            Some(make_javascript_number(
-                ((*numer_x as f64) / (*denom_x as f64)).to_listv(),
-                get_cloned.clone(),
-            ))
-        })
-    ]);
-    let get_cloned = get.clone();
-    put(list![
-        "raise",
-        list!["javascript_number"],
-        ClosureWrapper::new(move |args| {
-            let i = args.head();
+    let tag = |x| attach_tag(tag_name, &x);
 
+    install_binary_op::<T>(
+        "add",
+        tag_name,
+        {
+            let make_value_ = make_value.clone();
+            move |x: T, y: T| make_value_(x + y)
+        },
+        arith,
+    );
+    install_binary_op::<T>(
+        "sub",
+        tag_name,
+        {
+            let make_value_ = make_value.clone();
+            move |x: T, y: T| make_value_(x - y)
+        },
+        arith,
+    );
+    install_binary_op::<T>(
+        "mul",
+        tag_name,
+        {
+            let make_value_ = make_value.clone();
+            move |x: T, y: T| make_value_(x * y)
+        },
+        arith,
+    );
+    install_binary_op::<T>(
+        "div",
+        tag_name,
+        {
+            let make_value_ = make_value.clone();
+            move |x: T, y: T| {
+                if y == T::zero() {
+                    panic!("{} divide by zero", tag_name)
+                } else {
+                    make_value_(x / y)
+                }
+            }
+        },
+        arith,
+    );
+
+    install_binary_op::<T>(
+        "is_equal",
+        tag_name,
+        move |x: T, y: T| (x.to_listv() == y.to_listv()).to_listv(),
+        arith,
+    );
+    install_unary_op::<T>(
+        "is_equal_to_zero",
+        tag_name,
+        move |x: T| (x == T::zero()).to_listv(),
+        arith,
+    );
+    install_unary_op::<T>(
+        "negative",
+        tag_name,
+        {
+            let make_value_ = make_value.clone();
+            move |x: T| make_value_((T::zero() - T::one()) * x)
+        },
+        arith,
+    );
+    install_unary_op::<T>(
+        "abs",
+        tag_name,
+        {
+            let make_value_ = make_value.clone();
+            move |x: T| {
+                let abs = if x >= T::zero() {
+                    x
+                } else {
+                    (T::zero() - T::one()) * x
+                };
+                make_value_(abs)
+            }
+        },
+        arith,
+    );
+
+    install_unary_op::<T>("make", tag_name, move |x| tag(x.to_listv()), arith);
+
+    Some("done".to_string().to_listv())
+}
+pub fn install_integer_package(arith: &ArithmeticContext) -> Option<List> {
+    install_basic_numeric_type::<i32>(
+        "integer",
+        {
+            let arith = arith.clone();
+            move |x| make_integer(x, &arith)
+        },
+        arith,
+    );
+    arith.put("raise", list!["integer"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| Some(make_rational(args.head(), 1.to_listv(), &arith)))
+    });
+    // sqrt integer
+    arith.put("sqrt", list!["integer"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let x = *(args
+                .head()
+                .try_as_basis_value::<i32>()
+                .expect("sqrt integer: integer must be i32"));
+            let x = arith.drop_to_type(
+                &make_float((x as f64).sqrt(), &arith),
+                "integer".to_string(),
+            );
+            // 返回值可能不是integer
+            Some(x)
+        })
+    });
+    Some("done".to_string().to_listv())
+}
+pub fn install_float_package(arith: &ArithmeticContext) -> Option<List> {
+    install_basic_numeric_type::<f64>(
+        "float",
+        {
+            let arith = arith.clone();
+            move |x| make_float(x, &arith)
+        },
+        arith,
+    );
+    arith.put("raise", list!["float"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
             Some(make_complex_from_real_imag(
-                i,
+                args.head(),
                 0.0.to_listv(),
-                get_cloned.clone(),
+                &arith,
             ))
         })
-    ]);
+    });
+    // project real to rational
+    arith.put("project", list!["float"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let real = args.head();
+            let real = real.try_as_basis_value::<f64>().unwrap();
+            let (numer, denom) = float_to_fraction(*real, i32::MAX);
+            Some(make_rational(numer.to_listv(), denom.to_listv(), &arith))
+        })
+    });
+    // sqrt float
+    arith.put("sqrt", list!["float"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let x = *(args
+                .head()
+                .try_as_basis_value::<f64>()
+                .expect("sqrt float: float must be f64"));
+            Some(make_float(x.sqrt(), &arith))
+        })
+    });
+    Some("done".to_string().to_listv())
+}
+
+pub fn install_rational_package(arith: &ArithmeticContext) -> Option<List> {
+    let tag = |x| attach_tag("rational", &x);
+    arith.put("make", list!["rational"], {
+        let arith = arith.clone();
+        let tag = tag.clone();
+        ClosureWrapper::new(move |args| {
+            let (n, d) = (args.head(), args.tail().head());
+            assert!(
+                type_tag(&n) != "float".to_listv() && type_tag(&d) != "float".to_listv(),
+                "make rational: numer and denom must not float"
+            );
+            if arith.is_equal_to_zero(&d) == true.to_listv() {
+                panic!("make rational: zero denominator");
+            }
+
+            if type_tag(&n) == "integer".to_listv() && type_tag(&d) == "integer".to_listv() {
+                let (n, d) = (
+                    n.try_as_basis_value::<i32>()
+                        .expect("make rational with integer error"),
+                    d.try_as_basis_value::<i32>()
+                        .expect("make rational with integer error"),
+                );
+                let g = (*n).gcd(d);
+                Some(tag(pair!(n / g, d / g)))
+            } else {
+                // may be complex or polynomial
+                Some(tag(pair!(n.clone(), d.clone())))
+            }
+        })
+    });
+    arith.put(
+        "numer",
+        list!["rational"],
+        ClosureWrapper::new(move |args| Some(args.head().head())),
+    );
+    arith.put(
+        "denom",
+        list!["rational"],
+        ClosureWrapper::new(move |args| Some(args.head().tail())),
+    );
+
+    let extract_xy_numer_denom = {
+        let (arith, tag) = (arith.clone(), tag.clone());
+        move |args: &List| {
+            // 使用 tag 函数重新附加数据类型标签：
+            // apply_generic 在处理参数时会移除类型标签，
+            // 这里通过 tag 函数重新为参数附加类型标签，以便后续操作能够识别数据类型。
+            let (x, y) = (tag(args.head()), tag(args.tail().head()));
+            let (numer_x, denom_x) = (arith.numer(&x), arith.denom(&x));
+            let (numer_y, denom_y) = (arith.numer(&y), arith.denom(&y));
+            (numer_x, denom_x, numer_y, denom_y)
+        }
+    };
+    arith.put("add", list!["rational", "rational"], {
+        let (arith, extract_xy_) = (arith.clone(), extract_xy_numer_denom.clone());
+        ClosureWrapper::new(move |args| {
+            let (n_x, d_x, n_y, d_y) = extract_xy_(args);
+            let n = arith.add(&arith.mul(&n_x, &d_y), &arith.mul(&n_y, &d_x));
+            let d = arith.mul(&d_x, &d_y);
+            Some(make_rational(n, d, &arith))
+        })
+    });
+    arith.put("sub", list!["rational", "rational"], {
+        let (arith, extract_xy_) = (arith.clone(), extract_xy_numer_denom.clone());
+        ClosureWrapper::new(move |args| {
+            let (n_x, d_x, n_y, d_y) = extract_xy_(args);
+            let n = arith.sub(&arith.mul(&n_x, &d_y), &arith.mul(&n_y, &d_x));
+            let d = arith.mul(&d_x, &d_y);
+            Some(make_rational(n, d, &arith))
+        })
+    });
+    arith.put("mul", list!["rational", "rational"], {
+        let (arith, extract_xy_) = (arith.clone(), extract_xy_numer_denom.clone());
+        ClosureWrapper::new(move |args| {
+            let (n_x, d_x, n_y, d_y) = extract_xy_(args);
+            let n = arith.mul(&n_x, &n_y);
+            let d = arith.mul(&d_x, &d_y);
+            Some(make_rational(n, d, &arith))
+        })
+    });
+    arith.put("div", list!["rational", "rational"], {
+        let (arith, extract_xy_) = (arith.clone(), extract_xy_numer_denom.clone());
+        ClosureWrapper::new(move |args| {
+            let (n_x, d_x, n_y, d_y) = extract_xy_(args);
+            let n = arith.mul(&n_x, &d_y);
+            let d = arith.mul(&d_x, &n_y);
+            Some(make_rational(n, d, &arith))
+        })
+    });
+    arith.put("is_equal", list!["rational", "rational"], {
+        let (arith, extract_xy_) = (arith.clone(), extract_xy_numer_denom.clone());
+        ClosureWrapper::new(move |args| {
+            let (n_x, d_x, n_y, d_y) = extract_xy_(args);
+            Some(
+                (arith.is_equal(&n_x, &n_y) == true.to_listv()
+                    && arith.is_equal(&d_x, &d_y) == true.to_listv())
+                .to_listv(),
+            )
+        })
+    });
+    arith.put("is_equal_to_zero", list!["rational"], {
+        let (arith, tag) = (arith.clone(), tag.clone());
+        ClosureWrapper::new(move |args| {
+            // 调用链中有apply_generic的调用，需要使用 tag 函数重新附加数据类型标签
+            let n = arith.numer(&tag(args.head()));
+            Some((arith.is_equal_to_zero(&n) == true.to_listv()).to_listv())
+        })
+    });
+    arith.put("raise", list!["rational"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            // 调用链中有apply_generic的调用，需要使用 tag 函数重新附加数据类型标签
+            let n = arith.numer(&tag(args.head()));
+            let d = arith.denom(&tag(args.head()));
+            // try drop to integer
+            let (n, d) = (arith.drop(&n), arith.drop(&d));
+            if type_tag(&n) == "integer".to_listv() && type_tag(&d) == "integer".to_listv() {
+                let n = n
+                    .try_as_basis_value::<i32>()
+                    .expect("raise rational with integer error");
+                let d = d
+                    .try_as_basis_value::<i32>()
+                    .expect("raise rational with integer error");
+                let f = (*n as f64) / (*d as f64);
+                Some(make_float(f, &arith))
+            } else {
+                panic!(
+                    "raise: rational to float error, not support {} to raise",
+                    args
+                );
+            }
+        })
+    });
+    // project rational to integer
+    arith.put("project", list!["rational"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            // 调用链中有apply_generic的调用，需要使用 tag 函数重新附加数据类型标签
+            let n = arith.numer(&tag(args.head()));
+            let d = arith.denom(&tag(args.head()));
+            // try drop to integer
+            let (n, d) = (arith.drop(&n), arith.drop(&d));
+            if type_tag(&n) == "integer".to_listv() && type_tag(&d) == "integer".to_listv() {
+                let numer = *n.try_as_basis_value::<i32>().unwrap() as f64;
+                let denom = *d.try_as_basis_value::<i32>().unwrap() as f64;
+                let i = (numer / denom).floor() as i32;
+                Some(make_integer(i, &arith))
+            } else {
+                eprintln!(
+                    "project: rational to integer error: numer&denom only support integer found {}",
+                    args
+                );
+                None
+            }
+        })
+    });
+    // sqrt rational
+    arith.put("sqrt", list!["rational"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            // 调用链中有apply_generic的调用，需要使用 tag 函数重新附加数据类型标签
+            let n = arith.numer(&tag(args.head()));
+            let d = arith.denom(&tag(args.head()));
+            // try drop to integer
+            let (n, d) = (arith.drop(&n), arith.drop(&d));
+            if type_tag(&n) == "integer".to_listv() && type_tag(&d) == "integer".to_listv() {
+                let n = n
+                    .try_as_basis_value::<i32>()
+                    .expect("sqrt rational with integer error");
+                let d = d
+                    .try_as_basis_value::<i32>()
+                    .expect("sqrt rational with integer error");
+                let f = make_float(((*n as f64) / (*d as f64)).sqrt(), &arith);
+                // 返回值可能不是rational
+                Some(arith.drop_to_type(&f, "rational".to_string()))
+            } else {
+                panic!("sqrt rational error, not support {} to sqrt", args);
+            }
+        })
+    });
     Some("done".to_string().to_listv())
 }
 // 将浮点数转换为分数（分子和分母）
@@ -195,794 +851,545 @@ pub fn float_to_fraction(x: f64, max_denominator: i32) -> (i32, i32) {
         (numer1, denom1)
     }
 }
-pub fn install_arithmetic_project_package(
-    optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
-) -> Option<List> {
-    let op_cloned = optable.clone();
-    let get = move |args: List| optable("lookup").call(&args);
-    let put = move |args: List| op_cloned("insert").call(&args);
-    // project complex to real
-    let get_cloned = get.clone();
-    put(list![
-        "project",
-        list!["complex"],
+pub fn install_rectangular_package(arith: &ArithmeticContext) -> Option<List> {
+    let tag = |x: &List| attach_tag("rectangular", x);
+    arith.put("make_from_real_imag", list!["rectangular"], {
+        let tag = tag.clone();
         ClosureWrapper::new(move |args| {
-            let real = real_part(&args.head(), get_cloned.clone());
-            Some(make_javascript_number(real, get_cloned.clone()))
+            let (x, y) = (args.head(), args.tail().head());
+            Some(tag(&pair!(x, y)))
         })
-    ]);
-    // project real to rational
-    let get_cloned = get.clone();
-    put(list![
-        "project",
-        list!["javascript_number"],
+    });
+    arith.put("make_from_mag_ang", list!["rectangular"], {
+        let tag = tag.clone();
         ClosureWrapper::new(move |args| {
-            let real = args.head();
-            let real = real.try_as_basis_value::<f64>().unwrap();
-            let (numer, denom) = float_to_fraction(*real, i32::MAX);
-            Some(make_rational(
-                numer.to_listv(),
-                denom.to_listv(),
-                get_cloned.clone(),
-            ))
-        })
-    ]);
-    // project rational to integer
-    let get_cloned = get.clone();
-    put(list![
-        "project",
-        list!["rational"],
-        ClosureWrapper::new(move |args| {
-            let numer = args.head().head();
-            let denom = args.head().tail();
-            let numer = *numer.try_as_basis_value::<i32>().unwrap() as f64;
-            let denom = *denom.try_as_basis_value::<i32>().unwrap() as f64;
-            let i = (numer / denom).floor() as i32;
-            Some(make_javascript_integer(i.to_listv(), get_cloned.clone()))
-        })
-    ]);
-
-    Some("done".to_string().to_listv())
-}
-
-pub fn install_javascript_integer_package(
-    put: impl Fn(List) -> Option<List> + 'static,
-) -> Option<List> {
-    let tag = |x| attach_tag("integer", &x);
-    // put将以操作符和操作数类型为key，将操作函数放入二维表格中。
-    // 由于泛型函数为一集函数，而非一个函数，我们无法将一集函数放入二维表格，故此处仅按照i32来实现。
-    let get_x_y = |args: &List| {
-        let (x, y) = (args.head(), args.tail().head());
-        let (x, y) = (
-            x.try_as_basis_value::<i32>()
-                .expect(JAVASCRIPT_INTEGER_ERROR_MESSAGE),
-            y.try_as_basis_value::<i32>()
-                .expect(JAVASCRIPT_INTEGER_ERROR_MESSAGE),
-        );
-        (*x, *y)
-    };
-    put(list![
-        "add",
-        list!["integer", "integer"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = get_x_y(args);
-            Some(tag((x + y).to_listv()))
-        })
-    ]);
-    put(list![
-        "sub",
-        list!["integer", "integer"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = get_x_y(args);
-            Some(tag((x - y).to_listv()))
-        })
-    ]);
-    put(list![
-        "mul",
-        list!["integer", "integer"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = get_x_y(args);
-            Some(tag((x * y).to_listv()))
-        })
-    ]);
-    put(list![
-        "div",
-        list!["integer", "integer"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = get_x_y(args);
-            Some(tag((x / y).to_listv()))
-        })
-    ]);
-    put(list![
-        "equal",
-        list!["integer", "integer"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = (args.head(), args.tail().head());
-            Some((x == y).to_listv())
-        })
-    ]);
-
-    put(list![
-        "is_equal_to_zero",
-        list!["integer"],
-        ClosureWrapper::new(move |args: &List| { Some((args.head() == 0.to_listv()).to_listv()) })
-    ]);
-    put(list![
-        "make",
-        "integer",
-        ClosureWrapper::new(move |x: &List| { Some(tag(x.head())) })
-    ]);
-
-    Some("done".to_string().to_listv())
-}
-pub fn make_javascript_integer(x: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    get(list!["make", "integer"])
-        .unwrap()
-        .try_as_basis_value::<ClosureWrapper>()
-        .unwrap()
-        .call(&list![x])
-        .unwrap()
-}
-pub fn install_javascript_number_package(
-    put: impl Fn(List) -> Option<List> + 'static,
-) -> Option<List> {
-    let tag = |x| attach_tag("javascript_number", &x);
-    // put将以操作符和操作数类型为key，将操作函数放入二维表格中。
-    // 由于泛型函数为一集函数，而非一个函数，我们无法将一集函数放入二维表格，故此处仅按照f64来实现。
-    let get_x_y = |args: &List| {
-        let (x, y) = (args.head(), args.tail().head());
-        let (x, y) = (
-            x.try_as_basis_value::<f64>()
-                .expect(JAVASCRIPT_NUMBER_ERROR_MESSAGE),
-            y.try_as_basis_value::<f64>()
-                .expect(JAVASCRIPT_NUMBER_ERROR_MESSAGE),
-        );
-        (*x, *y)
-    };
-    put(list![
-        "add",
-        list!["javascript_number", "javascript_number"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = get_x_y(args);
-            Some(tag((x + y).to_listv()))
-        })
-    ]);
-    put(list![
-        "sub",
-        list!["javascript_number", "javascript_number"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = get_x_y(args);
-            Some(tag((x - y).to_listv()))
-        })
-    ]);
-    put(list![
-        "mul",
-        list!["javascript_number", "javascript_number"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = get_x_y(args);
-            Some(tag((x * y).to_listv()))
-        })
-    ]);
-    put(list![
-        "div",
-        list!["javascript_number", "javascript_number"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = get_x_y(args);
-            Some(tag((x / y).to_listv()))
-        })
-    ]);
-    put(list![
-        "equal",
-        list!["javascript_number", "javascript_number"],
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = (args.head(), args.tail().head());
-            Some((x == y).to_listv())
-        })
-    ]);
-
-    put(list![
-        "is_equal_to_zero",
-        list!["javascript_number"],
-        ClosureWrapper::new(move |args: &List| {
-            Some((args.head() == 0.0.to_listv()).to_listv())
-        })
-    ]);
-    put(list![
-        "make",
-        "javascript_number",
-        ClosureWrapper::new(move |x: &List| { Some(tag(x.head())) })
-    ]);
-
-    Some("done".to_string().to_listv())
-}
-pub fn make_javascript_number(x: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    get(list!["make", "javascript_number"])
-        .unwrap()
-        .try_as_basis_value::<ClosureWrapper>()
-        .unwrap()
-        .call(&list![x])
-        .unwrap()
-}
-pub fn install_rational_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
-    let numer = ClosureWrapper::new(move |x: &List| Some(x.head().head()));
-
-    let denom = ClosureWrapper::new(move |x: &List| Some(x.head().tail()));
-    let make_rat = ClosureWrapper::new(move |args: &List| {
-        let (n, d) = (args.head(), args.tail().head());
-        let (n, d) = (
-            n.try_as_basis_value::<i32>().expect(RATIONAL_ERROR_MESSAGE),
-            d.try_as_basis_value::<i32>().expect(RATIONAL_ERROR_MESSAGE),
-        );
-        let g = (*n).gcd(d);
-        Some(pair!(n / g, d / g))
-    });
-    let (numer_cloned, denom_cloned) = (numer.clone(), denom.clone());
-    let get_numer_and_denom = move |args: &List| {
-        let (x, y) = (args.head(), args.tail().head());
-        let (numer_x, denom_x, numer_y, denom_y) = (
-            numer_cloned.clone().call(&list![x.clone()]).unwrap(),
-            denom_cloned.clone().call(&list![x]).unwrap(),
-            numer_cloned.clone().call(&list![y.clone()]).unwrap(),
-            denom_cloned.clone().call(&list![y]).unwrap(),
-        );
-        let (numer_x, denom_x, numer_y, denom_y) = (
-            numer_x
-                .try_as_basis_value::<i32>()
-                .expect(RATIONAL_ERROR_MESSAGE),
-            denom_x
-                .try_as_basis_value::<i32>()
-                .expect(RATIONAL_ERROR_MESSAGE),
-            numer_y
-                .try_as_basis_value::<i32>()
-                .expect(RATIONAL_ERROR_MESSAGE),
-            denom_y
-                .try_as_basis_value::<i32>()
-                .expect(RATIONAL_ERROR_MESSAGE),
-        );
-        (*numer_x, *denom_x, *numer_y, *denom_y)
-    };
-
-    let (make_rat_cloned, get_numer_and_denom_cloned) =
-        (make_rat.clone(), get_numer_and_denom.clone());
-    let add_rat = ClosureWrapper::new(move |args| {
-        let (numer_x, denom_x, numer_y, denom_y) = get_numer_and_denom_cloned(args);
-        make_rat_cloned.call(&list![
-            numer_x * denom_y + numer_y * denom_x,
-            denom_x * denom_y
-        ])
-    });
-
-    let (make_rat_cloned, get_numer_and_denom_cloned) =
-        (make_rat.clone(), get_numer_and_denom.clone());
-    let sub_rat = ClosureWrapper::new(move |args| {
-        let (numer_x, denom_x, numer_y, denom_y) = get_numer_and_denom_cloned(args);
-        make_rat_cloned.call(&list![
-            numer_x * denom_y - numer_y * denom_x,
-            denom_x * denom_y
-        ])
-    });
-
-    let (make_rat_cloned, get_numer_and_denom_cloned) =
-        (make_rat.clone(), get_numer_and_denom.clone());
-    let mul_rat = ClosureWrapper::new(move |args| {
-        let (numer_x, denom_x, numer_y, denom_y) = get_numer_and_denom_cloned(args);
-        make_rat_cloned.call(&list![numer_x * numer_y, denom_x * denom_y])
-    });
-
-    let (make_rat_cloned, get_numer_and_denom_cloned) =
-        (make_rat.clone(), get_numer_and_denom.clone());
-    let div_rat = ClosureWrapper::new(move |args| {
-        let (numer_x, denom_x, numer_y, denom_y) = get_numer_and_denom_cloned(args);
-        make_rat_cloned.call(&list![numer_x * denom_y, denom_x * numer_y])
-    });
-
-    let tag = |x| attach_tag("rational", &x);
-    let numer_cloned = numer.clone();
-    put(list!["numer", list!["rational"], numer]);
-    put(list!["denom", list!["rational"], denom]);
-    let tag_cloned = tag.clone();
-    put(list![
-        "add",
-        list!["rational", "rational"],
-        ClosureWrapper::new(move |args| { Some(tag_cloned(add_rat.call(args).unwrap())) })
-    ]);
-    put(list![
-        "sub",
-        list!["rational", "rational"],
-        ClosureWrapper::new(move |args| { Some(tag_cloned(sub_rat.call(args).unwrap())) })
-    ]);
-    put(list![
-        "mul",
-        list!["rational", "rational"],
-        ClosureWrapper::new(move |args| { Some(tag_cloned(mul_rat.call(args).unwrap())) })
-    ]);
-    put(list![
-        "div",
-        list!["rational", "rational"],
-        ClosureWrapper::new(move |args| { Some(tag_cloned(div_rat.call(args).unwrap())) })
-    ]);
-    put(list![
-        "equal",
-        list!["rational", "rational"],
-        ClosureWrapper::new(move |args: &List| {
-            let (numer_x, denom_x, numer_y, denom_y) = get_numer_and_denom(args);
-            Some((numer_x == numer_y && denom_x == denom_y).to_listv())
-        })
-    ]);
-    put(list![
-        "is_equal_to_zero",
-        list!["rational"],
-        ClosureWrapper::new(move |args: &List| {
-            let numer_x = numer_cloned.clone().call(&list![args.head()]).unwrap();
-            Some((numer_x == 0.to_listv()).to_listv())
-        })
-    ]);
-    put(list![
-        "make",
-        "rational",
-        ClosureWrapper::new(move |args| { Some(tag_cloned(make_rat.call(args).unwrap())) })
-    ]);
-
-    Some("done".to_string().to_listv())
-}
-pub fn make_rational(n: List, d: List, get: impl Fn(List) -> Option<List> + 'static) -> List {
-    get(list!["make", "rational"])
-        .unwrap()
-        .try_as_basis_value::<ClosureWrapper>()
-        .unwrap()
-        .call(&list![n, d])
-        .unwrap()
-}
-pub fn install_rectangular_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
-    let real_part = ClosureWrapper::new(move |x: &List| Some(x.head().head()));
-
-    let imag_part = ClosureWrapper::new(move |x: &List| Some(x.head().tail()));
-    let (real_cloned, imag_cloned) = (real_part.clone(), imag_part.clone());
-
-    let get_real_imag = move |args: &List| {
-        let (r, i) = (
-            real_cloned.call(args).unwrap(),
-            imag_cloned.call(args).unwrap(),
-        );
-        let (r, i) = (
-            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-            i.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-        );
-        (*r, *i)
-    };
-    let get_real_imag_cloned = get_real_imag.clone();
-    let magnitude = ClosureWrapper::new(move |args: &List| {
-        let (r, i) = get_real_imag_cloned(args);
-        Some((r * r + i * i).sqrt().to_listv())
-    });
-    let get_real_imag_cloned = get_real_imag.clone();
-    let angle = ClosureWrapper::new(move |args: &List| {
-        let (r, i) = get_real_imag_cloned(args);
-        Some((i.atan2(r)).to_listv())
-    });
-
-    let make_from_real_imag = |x: List, y: List| pair![x, y];
-
-    let make_from_mag_ang = move |r: List, a: List| {
-        let (r, a) = (
-            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-            a.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-        );
-        make_from_real_imag((r * a.cos()).to_listv(), (r * a.sin()).to_listv())
-    };
-    let tag = |x| attach_tag("rectangular", &x);
-    // 注意安装操作符时，若action为具体的运算，则key2为list!包裹，list中为所有参与运算的参数的类型
-    put(list!["real_part", list!["rectangular"], real_part]);
-    put(list!["imag_part", list!["rectangular"], imag_part]);
-    put(list!["magnitude", list!["rectangular"], magnitude]);
-    put(list!["angle", list!["rectangular"], angle]);
-
-    // 注意安装操作符时，若action为make，则key2为单值，值为具体的类型名称
-    put(list![
-        "make_from_real_imag",
-        "rectangular",
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = (args.head(), args.tail().head());
-            Some(tag(make_from_real_imag(x, y)))
-        })
-    ]);
-    put(list![
-        "make_from_mag_ang",
-        "rectangular",
-        ClosureWrapper::new(move |args: &List| {
             let (r, a) = (args.head(), args.tail().head());
-            Some(tag(make_from_mag_ang(r, a)))
-        })
-    ]);
-    Some("done".to_string().to_listv())
-}
-
-pub fn install_polar_package(put: impl Fn(List) -> Option<List> + 'static) -> Option<List> {
-    let magnitude = ClosureWrapper::new(move |x: &List| Some(contents(x).head().head()));
-    let angle = ClosureWrapper::new(move |x: &List| Some(contents(x).head().tail()));
-    let (magnitude_cloned, angle_cloned) = (magnitude.clone(), angle.clone());
-    let get_magnitude_and_angle = move |args: &List| {
-        let (m, a) = (
-            magnitude_cloned.call(args).unwrap(),
-            angle_cloned.call(args).unwrap(),
-        );
-        let (m, a) = (
-            m.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-            a.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-        );
-        (*m, *a)
-    };
-    let get_magnitude_and_angle_cloned = get_magnitude_and_angle.clone();
-    let real_part = ClosureWrapper::new(move |args: &List| {
-        let (m, a) = get_magnitude_and_angle_cloned(args);
-        Some((m * a.cos()).to_listv())
-    });
-    let get_magnitude_and_angle_cloned = get_magnitude_and_angle.clone();
-    let imag_part = ClosureWrapper::new(move |args: &List| {
-        let (m, a) = get_magnitude_and_angle_cloned(args);
-        Some((m * a.sin()).to_listv())
-    });
-    let make_from_mag_ang = move |r: List, a: List| pair![r, a];
-    let make_from_real_imag = move |r: List, a: List| {
-        let (r, a) = (
-            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-            a.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-        );
-        pair![(r * r + a * a).sqrt(), (a.atan2(*r))]
-    };
-
-    let tag = |x| attach_tag("polar", &x);
-    put(list!["magnitude", list!["polar"], magnitude]);
-    put(list!["angle", list!["polar"], angle]);
-    put(list!["real_part", list!["polar"], real_part]);
-    put(list!["imag_part", list!["polar"], imag_part]);
-    put(list![
-        "make_from_real_imag",
-        "polar",
-        ClosureWrapper::new(move |args| {
-            let (x, y) = (args.head(), args.tail().head());
-            Some(tag(make_from_real_imag(x, y)))
-        })
-    ]);
-    put(list![
-        "make_from_mag_ang",
-        "polar",
-        ClosureWrapper::new(move |args| {
-            let (x, y) = (args.head(), args.tail().head());
-            Some(tag(make_from_mag_ang(x, y)))
-        })
-    ]);
-    Some("done".to_string().to_listv())
-}
-pub fn install_complex_packages(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> Option<List> {
-    let op_cloned = optable.clone();
-    let get = move |args: List| optable("lookup").call(&args);
-    let put = move |args: List| op_cloned("insert").call(&args);
-    let get_closure = |funlist: Option<List>| {
-        funlist
-            .unwrap()
-            .try_as_basis_value::<ClosureWrapper>()
-            .unwrap()
-            .clone()
-    };
-    let get_cloned = get.clone();
-    let make_from_real_imag = move |x: List, y: List| {
-        get_closure(get_cloned(list!["make_from_real_imag", "rectangular"]))
-            .call(&list![x, y])
-            .unwrap()
-    };
-    let get_cloned = get.clone();
-    let make_from_mag_ang = move |r: List, a: List| {
-        get_closure(get_cloned(list!["make_from_mag_ang", "polar"]))
-            .call(&list![r, a])
-            .unwrap()
-    };
-    let get_cloned = get.clone();
-    let get_real_imag = move |z: &List| {
-        let (get1, get2) = (get_cloned.clone(), get_cloned.clone());
-        let (r, i) = (real_part(z, get1), imag_part(z, get2));
-        let (r, i) = (
-            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-            i.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-        );
-        (*r, *i)
-    };
-    let get_real_imag_cloned = get_real_imag.clone();
-    let make_from_real_imag_cloned = make_from_real_imag.clone();
-    let add_complex = move |z1: &List, z2: &List| {
-        let (r1, i1) = get_real_imag_cloned(z1);
-        let (r2, i2) = get_real_imag_cloned(z2);
-        make_from_real_imag_cloned((r1 + r2).to_listv(), (i1 + i2).to_listv())
-    };
-    let get_real_imag_cloned = get_real_imag.clone();
-    let make_from_real_imag_cloned = make_from_real_imag.clone();
-    let sub_complex = move |z1: &List, z2: &List| {
-        let (r1, i1) = get_real_imag_cloned(z1);
-        let (r2, i2) = get_real_imag_cloned(z2);
-
-        make_from_real_imag_cloned((r1 - r2).to_listv(), (i1 - i2).to_listv())
-    };
-    let get_cloned = get.clone();
-    let get_magnitude_and_angle = move |z: &List| {
-        let (get1, get2) = (get_cloned.clone(), get_cloned.clone());
-        let (r, a) = (magnitude(z, get1), angle(z, get2));
-        let (r, a) = (
-            r.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-            a.try_as_basis_value::<f64>().expect(COMPLEX_ERROR_MESSAGE),
-        );
-        (*r, *a)
-    };
-    let get_mantitude_and_angle_cloned = get_magnitude_and_angle.clone();
-    let make_from_mag_ang_cloned = make_from_mag_ang.clone();
-
-    let mul_complex = move |z1: &List, z2: &List| {
-        let (r1, i1) = get_mantitude_and_angle_cloned(z1);
-        let (r2, i2) = get_mantitude_and_angle_cloned(z2);
-        make_from_mag_ang_cloned((r1 * r2).to_listv(), (i1 + i2).to_listv())
-    };
-    let get_mantitude_and_angle_cloned = get_magnitude_and_angle.clone();
-    let make_from_mag_ang_cloned = make_from_mag_ang.clone();
-
-    let div_complex = move |z1: &List, z2: &List| {
-        let (r1, i1) = get_mantitude_and_angle_cloned(z1);
-        let (r2, i2) = get_mantitude_and_angle_cloned(z2);
-        make_from_mag_ang_cloned((r1 / r2).to_listv(), (i1 - i2).to_listv())
-    };
-    let get_real_imag_cloned = get_real_imag.clone();
-    let equal = ClosureWrapper::new(move |args: &List| {
-        let (real_x, imag_x) = get_real_imag_cloned(&args.head());
-        let (real_y, imag_y) = get_real_imag_cloned(&args.tail().head());
-        Some((real_x == real_y && imag_x == imag_y).to_listv())
-    });
-    let get_cloned = get.clone();
-    let is_equal_to_zero = ClosureWrapper::new(move |args: &List| {
-        let z = args.head();
-        let (real_x, imag_x) = (
-            real_part(&z, get_cloned.clone()),
-            imag_part(&z, get_cloned.clone()),
-        );
-        Some((real_x == 0.0.to_listv() && imag_x == 0.0.to_listv()).to_listv())
-    });
-    let tag = |x| attach_tag("complex", &x);
-    put(list![
-        "add",
-        list!["complex", "complex"],
-        ClosureWrapper::new(move |args: &List| {
-            let (z1, z2) = (args.head(), args.tail().head());
-            Some(tag(add_complex(&z1, &z2)))
-        })
-    ]);
-    put(list![
-        "sub",
-        list!["complex", "complex"],
-        ClosureWrapper::new(move |args: &List| {
-            let (z1, z2) = (args.head(), args.tail().head());
-            Some(tag(sub_complex(&z1, &z2)))
-        })
-    ]);
-    put(list![
-        "mul",
-        list!["complex", "complex"],
-        ClosureWrapper::new(move |args: &List| {
-            let (z1, z2) = (args.head(), args.tail().head());
-            Some(tag(mul_complex(&z1, &z2)))
-        })
-    ]);
-    put(list![
-        "div",
-        list!["complex", "complex"],
-        ClosureWrapper::new(move |args: &List| {
-            let (z1, z2) = (args.head(), args.tail().head());
-            Some(tag(div_complex(&z1, &z2)))
-        })
-    ]);
-    put(list!["equal", list!["complex", "complex"], equal]);
-    put(list![
-        "is_equal_to_zero",
-        list!["complex"],
-        is_equal_to_zero
-    ]);
-    let get_cloned = get.clone();
-    put(list![
-        "real_part",
-        list!["complex"],
-        ClosureWrapper::new(move |args: &List| Some(real_part(args, get_cloned.clone())))
-    ]);
-    let get_cloned = get.clone();
-    put(list![
-        "imag_part",
-        list!["complex"],
-        ClosureWrapper::new(move |args: &List| Some(imag_part(args, get_cloned.clone())))
-    ]);
-    let get_cloned = get.clone();
-    put(list![
-        "magnitude",
-        list!["complex"],
-        ClosureWrapper::new(move |args: &List| Some(magnitude(args, get_cloned.clone())))
-    ]);
-    let get_cloned = get.clone();
-    put(list![
-        "angle",
-        list!["complex"],
-        ClosureWrapper::new(move |args: &List| Some(angle(args, get_cloned.clone())))
-    ]);
-    put(list![
-        "make_from_real_imag",
-        "complex",
-        ClosureWrapper::new(move |args: &List| {
-            let x = args.head();
-            let y = args.tail().head();
-            Some(tag(make_from_real_imag(x.clone(), y.clone())))
-        })
-    ]);
-    put(list![
-        "make_from_mag_ang",
-        "complex",
-        ClosureWrapper::new(move |args: &List| {
-            let (x, y) = (args.head(), args.tail().head());
-            Some(tag(make_from_mag_ang(x.clone(), y.clone())))
-        })
-    ]);
-
-    Some("done".to_string().to_listv())
-}
-pub fn make_complex_from_real_imag(
-    x: List,
-    y: List,
-    get: impl Fn(List) -> Option<List> + 'static,
-) -> List {
-    get(list!["make_from_real_imag", "complex"])
-        .unwrap()
-        .try_as_basis_value::<ClosureWrapper>()
-        .unwrap()
-        .call(&list![x, y])
-        .unwrap()
-}
-pub fn make_complex_from_mag_ang(
-    r: List,
-    a: List,
-    get: impl Fn(List) -> Option<List> + 'static,
-) -> List {
-    get(list!["make_from_mag_ang", "complex"])
-        .unwrap()
-        .try_as_basis_value::<ClosureWrapper>()
-        .unwrap()
-        .call(&list![r, a])
-        .unwrap()
-}
-pub fn install_arithmetic_package(optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> Option<List> {
-    let op_cloned = optable.clone();
-    let put = move |args: List| op_cloned("insert").call(&args);
-    install_complex_packages(optable.clone());
-    install_rectangular_package(put.clone());
-    install_polar_package(put.clone());
-    install_rational_package(put.clone());
-    install_javascript_number_package(put.clone());
-    install_javascript_integer_package(put.clone());
-    install_arithmetic_raise_package(optable.clone());
-    install_arithmetic_project_package(optable.clone());
-    Some("done".to_string().to_listv())
-}
-// coercion support
-pub fn put_coercion(
-    type1: &List,
-    type2: &List,
-    proc: ClosureWrapper,
-    coercion_list: &List,
-) -> List {
-    if get_coercion(type1, type2, coercion_list).is_none() {
-        pair![
-            list![type1.clone(), type2.clone(), proc],
-            coercion_list.clone()
-        ]
-    } else {
-        coercion_list.clone()
-    }
-}
-pub fn get_coercion(type1: &List, type2: &List, coercion_list: &List) -> Option<List> {
-    fn get_type1(list_item: &List) -> List {
-        list_item.head()
-    }
-    fn get_type2(list_item: &List) -> List {
-        list_item.tail().head()
-    }
-    fn get_proc(list_item: &List) -> List {
-        list_item.tail().tail().head()
-    }
-    fn get_coercion_iter(type1: &List, type2: &List, items: &List) -> Option<List> {
-        if items.is_empty() {
-            None
-        } else {
-            let top = items.head();
-
-            if get_type1(&top) == *type1 && get_type2(&top) == *type2 {
-                Some(get_proc(&top))
+            if r.is_float_value() && a.is_float_value() {
+                let r = r
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64");
+                let a = a
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64");
+                Some(tag(&pair![*r * a.cos(), *r * a.sin()]))
             } else {
-                get_coercion_iter(type1, type2, &items.tail())
+                todo!("complex make_from_mag_ang rectangular Now only support f64")
+            }
+        })
+    });
+
+    arith.put("real_part", list!["rectangular"], {
+        ClosureWrapper::new(move |args| Some(args.head().head()))
+    });
+    arith.put("imag_part", list!["rectangular"], {
+        ClosureWrapper::new(move |args| Some(args.head().tail()))
+    });
+
+    let extract_real_imag = {
+        let arith = arith.clone();
+        move |arg: &List| {
+            // 使用 tag 函数重新附加数据类型标签：
+            // apply_generic 在处理参数时会移除类型标签，
+            // 这里通过 tag 函数重新为参数附加类型标签，以便后续操作能够识别数据类型。
+            let args = tag(arg);
+            let (real_x, imag_x) = (arith.real_part(&args), arith.imag_part(&args));
+            (real_x, imag_x)
+        }
+    };
+    arith.put("magnitude", list!["rectangular"], {
+        let extract = extract_real_imag.clone();
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let (real, imag) = extract(&args.head());
+            if is_basis_arithmetic_type(&real)
+                && type_tag(&real) != "complex".to_listv()
+                && is_basis_arithmetic_type(&real)
+                && type_tag(&real) != "complex".to_listv()
+            {
+                // sqrt only for (integer, rational, float)
+                // (real*real + imag*imag).sqrt()
+                let r2 = arith.mul(&real, &real);
+                let i2 = arith.mul(&imag, &imag);
+                let x = arith.add(&r2, &i2);
+                Some(arith.drop(&arith.sqrt(&x)))
+            } else {
+                panic!("complex magnitude not support for {}", args);
+            }
+        })
+    });
+    arith.put("angle", list!["rectangular"], {
+        let extract = extract_real_imag.clone();
+        ClosureWrapper::new(move |args| {
+            let (real, imag) = extract(&args.head());
+            if real.is_float_value() && imag.is_float_value() {
+                let r = real
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64");
+                let i = imag
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64");
+                Some((i.atan2(*r)).to_listv())
+            } else {
+                todo!("complex angle Now only support f64")
+            }
+        })
+    });
+    arith.put("is_equal", list!["rectangular", "rectangular"], {
+        let arith = arith.clone();
+        let extract = extract_real_imag.clone();
+        ClosureWrapper::new(move |args| {
+            let (x, y) = (args.head(), args.tail().head());
+            let ((r_x, i_x), (r_y, i_y)) = (extract(&x), extract(&y));
+            Some(
+                (arith.is_equal(&r_x, &r_y) == true.to_listv()
+                    && arith.is_equal(&i_x, &i_y) == true.to_listv())
+                .to_listv(),
+            )
+        })
+    });
+    arith.put("is_equal_to_zero", list!["rectangular"], {
+        let arith = arith.clone();
+        let extract = extract_real_imag.clone();
+        ClosureWrapper::new(move |args| {
+            let (r, i) = extract(&args.head());
+            Some(
+                (arith.is_equal_to_zero(&r) == true.to_listv()
+                    && arith.is_equal_to_zero(&i) == true.to_listv())
+                .to_listv(),
+            )
+        })
+    });
+    Some("done".to_string().to_listv())
+}
+
+pub fn install_polar_package(arith: &ArithmeticContext) -> Option<List> {
+    let tag = |x: &List| attach_tag("polar", x);
+    arith.put("make_from_mag_ang", list!["polar"], {
+        let tag = tag.clone();
+        ClosureWrapper::new(move |args| {
+            let (x, y) = (args.head(), args.tail().head());
+            Some(tag(&pair!(x, y)))
+        })
+    });
+    arith.put("make_from_real_imag", list!["polar"], {
+        let tag = tag.clone();
+        ClosureWrapper::new(move |args| {
+            let (r, i) = (args.head(), args.tail().head());
+            if r.is_float_value() && i.is_float_value() {
+                let r = r
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64")
+                    .clone();
+                let i = i
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64")
+                    .clone();
+                Some(tag(&pair![(r * r + i * i).sqrt(), i.atan2(r)]))
+            } else {
+                todo!("complex make_from_real_imag polar Now only support f64")
+            }
+        })
+    });
+
+    arith.put("magnitude", list!["polar"], {
+        ClosureWrapper::new(move |args| Some(args.head().head()))
+    });
+    arith.put("angle", list!["polar"], {
+        ClosureWrapper::new(move |args| Some(args.head().tail()))
+    });
+    let extract_mag_ang = {
+        let arith = arith.clone();
+        move |arg: &List| {
+            // 使用 tag 函数重新附加数据类型标签：
+            // apply_generic 在处理参数时会移除类型标签，
+            // 这里通过 tag 函数重新为参数附加类型标签，以便后续操作能够识别数据类型。
+            let args = tag(arg);
+            let (mag, ang) = (arith.magnitude(&args), arith.angle(&args));
+            (mag, ang)
+        }
+    };
+    arith.put("real_part", list!["polar"], {
+        let extract = extract_mag_ang.clone();
+        ClosureWrapper::new(move |args| {
+            let (mag, ang) = extract(&args.head());
+            if mag.is_float_value() && ang.is_float_value() {
+                let m = mag
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64")
+                    .clone();
+                let a = ang
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64")
+                    .clone();
+                Some((m * a.cos()).to_listv())
+            } else {
+                todo!("complex real_part Now only support f64")
+            }
+        })
+    });
+    arith.put("imag_part", list!["polar"], {
+        let extract = extract_mag_ang.clone();
+        ClosureWrapper::new(move |args| {
+            let (mag, ang) = extract(&args.head());
+            if mag.is_float_value() && ang.is_float_value() {
+                let m = mag
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64")
+                    .clone();
+                let a = ang
+                    .try_as_basis_value::<f64>()
+                    .expect("complex: float type only support f64")
+                    .clone();
+                Some((m * a.sin()).to_listv())
+            } else {
+                todo!("complex imag_part Now only support f64")
+            }
+        })
+    });
+    arith.put("is_equal", list!["polar", "polar"], {
+        let arith = arith.clone();
+        let extract = extract_mag_ang.clone();
+        ClosureWrapper::new(move |args| {
+            let (x, y) = (args.head(), args.tail().head());
+            let ((m_x, a_x), (m_y, a_y)) = (extract(&x), extract(&y));
+            Some(
+                (arith.is_equal(&m_x, &m_y) == true.to_listv()
+                    && arith.is_equal(&a_x, &a_y) == true.to_listv())
+                .to_listv(),
+            )
+        })
+    });
+    arith.put("is_equal_to_zero", list!["polar"], {
+        let arith = arith.clone();
+        let extract = extract_mag_ang.clone();
+        ClosureWrapper::new(move |args| {
+            let (m, _) = extract(&args.head());
+            Some((arith.is_equal_to_zero(&m) == true.to_listv()).to_listv())
+        })
+    });
+    Some("done".to_string().to_listv())
+}
+
+pub fn install_complex_package(arith: &ArithmeticContext) -> Option<List> {
+    let tag = |x: &List| attach_tag("complex", x);
+    arith.put("make_from_real_imag", list!["complex"], {
+        let tag = tag.clone();
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let (x, y) = (args.head(), args.tail().head());
+            if let Some(complex) = arith
+                .get(list!["make_from_real_imag", list!["rectangular"]])
+                .expect("make_from_real_imag rectangular failed get func")
+                .call(&list![x.clone(), y.clone()])
+            {
+                Some(tag(&complex))
+            } else {
+                panic!("make_from_real_imag rectangular failed for args:{}", args)
+            }
+        })
+    });
+    arith.put("make_from_mag_ang", list!["complex"], {
+        let tag = tag.clone();
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let (x, y) = (args.head(), args.tail().head());
+            if let Some(complex) = arith
+                .get(list!["make_from_mag_ang", list!["polar"]])
+                .expect("make_from_mag_ang polar failed get func")
+                .call(&list![x.clone(), y.clone()])
+            {
+                Some(tag(&complex))
+            } else {
+                panic!("make_from_mag_ang polar failed for args:{}", args)
+            }
+        })
+    });
+    arith.put("add", list!["complex", "complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let (r1, i1) = (arith.real_part(&args.head()), arith.imag_part(&args.head()));
+            let (r2, i2) = (
+                arith.real_part(&args.tail().head()),
+                arith.imag_part(&args.tail().head()),
+            );
+            let (r, i) = (arith.add(&r1, &r2), arith.add(&i1, &i2));
+            Some(make_complex_from_real_imag(r, i, &arith))
+        })
+    });
+    arith.put("sub", list!["complex", "complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let (r1, i1) = (arith.real_part(&args.head()), arith.imag_part(&args.head()));
+            let (r2, i2) = (
+                arith.real_part(&args.tail().head()),
+                arith.imag_part(&args.tail().head()),
+            );
+            let (r, i) = (arith.sub(&r1, &r2), arith.sub(&i1, &i2));
+            Some(make_complex_from_real_imag(r, i, &arith))
+        })
+    });
+    arith.put("mul", list!["complex", "complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let (m1, a1) = (arith.magnitude(&args.head()), arith.angle(&args.head()));
+            let (m2, a2) = (
+                arith.magnitude(&args.tail().head()),
+                arith.angle(&args.tail().head()),
+            );
+            let (m, a) = (arith.mul(&m1, &m2), arith.add(&a1, &a2));
+            Some(make_complex_from_real_imag(m, a, &arith))
+        })
+    });
+    arith.put("div", list!["complex", "complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let (m1, a1) = (arith.magnitude(&args.head()), arith.angle(&args.head()));
+            let (m2, a2) = (
+                arith.magnitude(&args.tail().head()),
+                arith.angle(&args.tail().head()),
+            );
+            let (m, a) = (arith.div(&m1, &m2), arith.sub(&a1, &a2));
+            Some(make_complex_from_real_imag(m, a, &arith))
+        })
+    });
+    arith.put("is_equal", list!["complex", "complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| Some(arith.is_equal(&args.head(), &args.tail().head())))
+    });
+    arith.put("is_equal_to_zero", list!["complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| Some(arith.is_equal_to_zero(&args.head())))
+    });
+    arith.put("real_part", list!["complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| Some(arith.real_part(&args)))
+    });
+    arith.put("imag_part", list!["complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| Some(arith.imag_part(&args)))
+    });
+    arith.put("magnitude", list!["complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| Some(arith.magnitude(&args)))
+    });
+    arith.put("angle", list!["complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| Some(arith.angle(&args)))
+    });
+    // project complex to real
+    arith.put("project", list!["complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let real = arith.real_part(args);
+            let real = if type_tag(&real).to_listv() == "integer".to_listv() {
+                *(real.try_as_basis_value::<i32>().unwrap()) as f64
+            } else if type_tag(&real) == "float".to_listv() {
+                *real.try_as_basis_value::<f64>().unwrap()
+            } else if type_tag(&real) == "rational".to_listv() {
+                *(arith.raise(&real).try_as_basis_value::<f64>().unwrap())
+            } else {
+                eprintln!("project complex to real only support basis arithmetic type");
+                return None;
+            };
+
+            Some(make_float(real, &arith))
+        })
+    });
+    Some("done".to_string().to_listv())
+}
+pub fn is_variable(x: &List) -> bool {
+    x.is_string_value()
+}
+pub fn is_same_variable(v1: &List, v2: &List) -> bool {
+    is_variable(v1) && is_variable(v2) && v1 == v2
+}
+// representation of poly
+fn make_poly(variable: List, term_list: List) -> List {
+    pair![variable, term_list]
+}
+fn variable(p: &List) -> List {
+    p.head()
+}
+fn term_list(p: &List) -> List {
+    p.tail()
+}
+// representation of terms and term lists
+fn order(term: &List) -> List {
+    term.head()
+}
+fn coeff(term: &List) -> List {
+    term.tail().head()
+}
+pub fn make_term(order: List, coeff: List) -> List {
+    list![order, coeff]
+}
+fn is_empty_term_list(term_list: &List) -> bool {
+    term_list.is_empty()
+}
+fn first_term(term_list: &List) -> List {
+    term_list.head()
+}
+fn rest_terms(term_list: &List) -> List {
+    term_list.tail()
+}
+fn adjoin_term(term: List, term_list: List, arith: &ArithmeticContext) -> List {
+    if arith.is_equal_to_zero(&coeff(&term)) == true.to_listv() {
+        term_list
+    } else {
+        pair![term, term_list]
+    }
+}
+fn add_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
+    if is_empty_term_list(&l1) {
+        l2.clone()
+    } else if is_empty_term_list(&l2) {
+        l1.clone()
+    } else {
+        let t1 = first_term(&l1);
+        let t2 = first_term(&l2);
+        if order(&t1).get_basis_value() > order(&t2).get_basis_value() {
+            adjoin_term(t1, add_terms(&rest_terms(&l1), l2, &arith), &arith)
+        } else if order(&t1).get_basis_value() < order(&t2).get_basis_value() {
+            adjoin_term(t2, add_terms(l1, &rest_terms(&l2), &arith), &arith)
+        } else {
+            adjoin_term(
+                make_term(order(&t1), arith.add(&coeff(&t1), &coeff(&t2))),
+                add_terms(&rest_terms(&l1), &rest_terms(&l2), &arith),
+                &arith,
+            )
+        }
+    }
+}
+fn mul_term_by_all_terms(t1: &List, l: &List, arith: &ArithmeticContext) -> List {
+    if is_empty_term_list(&l) {
+        List::Nil
+    } else {
+        let t2 = first_term(&l);
+        adjoin_term(
+            make_term(
+                arith.add(&order(&t1), &order(&t2)),
+                arith.mul(&coeff(&t1), &coeff(&t2)),
+            ),
+            mul_term_by_all_terms(&t1, &rest_terms(&l), &arith),
+            &arith,
+        )
+    }
+}
+fn mul_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
+    if is_empty_term_list(&l1) {
+        List::Nil
+    } else {
+        add_terms(
+            &mul_term_by_all_terms(&first_term(l1), l2, &arith),
+            &mul_terms(&rest_terms(l1), l2, &arith),
+            &arith,
+        )
+    }
+}
+pub fn pretty_polynomial(p: &List) -> String {
+    fn iter(term_list: &List) -> String {
+        let t1 = first_term(term_list);
+        let order1 = order(&t1);
+        let coeff1 = coeff(&t1);
+        let coeff1_str = if type_tag(&coeff1) == "polynomial".to_listv() {
+            pretty_polynomial(&coeff1)
+        } else {
+            coeff1.to_string()
+        };
+        if order1 == 0.to_listv() {
+            coeff1_str
+        } else {
+            format!(
+                "{}x^{} + {}",
+                coeff1_str,
+                order1,
+                iter(&rest_terms(term_list))
+            )
+        }
+    }
+    if term_list(&contents(&p)).is_empty() {
+        format!("({}:{})",type_tag(p), term_list(&contents(p)))
+    } else {
+        format!("({}:{})", type_tag(p), iter(&term_list(&contents(p))))
+    }
+    
+}
+pub fn install_polynomial_sparse_package(arith: &ArithmeticContext) -> Option<List> {
+    // internal functions
+
+    fn add_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
+        if is_same_variable(&variable(p1), &variable(p2)) {
+            make_poly(
+                variable(p1),
+                add_terms(&term_list(p1), &term_list(p2), &arith),
+            )
+        } else {
+            panic!(
+                "{} Polys not in same var -- ADD-POLY",
+                list![p1.clone(), p2.clone()]
+            )
+        }
+    }
+
+    fn mul_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
+        if is_same_variable(&variable(p1), &variable(p2)) {
+            make_poly(
+                variable(p1),
+                mul_terms(&term_list(p1), &term_list(p2), &arith),
+            )
+        } else {
+            panic!(
+                "{} Polys not in same var -- MUL-POLY",
+                list![p1.clone(), p2.clone()]
+            )
+        }
+    }
+    fn is_equal_to_zero(term_list: &List, arith: &ArithmeticContext) -> List {
+        if is_empty_term_list(term_list) {
+            true.to_listv()
+        } else {
+            // may be (polynomial:0x^2 + 0x^1 + 0)
+            let t = first_term(term_list);
+            if arith.is_equal_to_zero(&coeff(&t)) == false.to_listv() {
+                false.to_listv()
+            } else {
+                is_equal_to_zero(&rest_terms(term_list), &arith)
             }
         }
     }
-    get_coercion_iter(type1, type2, coercion_list)
-}
+    fn tag(x: &List) -> List {
+        attach_tag("polynomial", x)
+    }
 
-const ARITHMETIC_TYPES: [&str; 4] = ["integer", "rational", "javascript_number", "complex"];
+    arith.put("add", list!["polynomial", "polynomial"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args: &List| {
+            let (p1, p2) = (args.head(), args.tail().head());
+            Some(tag(&add_poly(&p1, &p2, &arith)))
+        })
+    });
 
-pub fn find_arithmetic_type_index(type_tag: &str) -> i32 {
-    for (i, t) in ARITHMETIC_TYPES.iter().enumerate() {
-        if type_tag == *t {
-            return i as i32;
-        }
-    }
-    -1
-}
-pub fn is_arithmetic_type(x: &List) -> bool {
-    find_arithmetic_type_index(&type_tag(x).to_string()) >= 0
-}
-pub fn arithmetic_type_raise(
-    a1: List,
-    a2: List,
-    optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
-) -> (List, List) {
-    let a1_type_tag = type_tag(&a1);
-    let a2_type_tag = type_tag(&a2);
-    let a1_index = find_arithmetic_type_index(&a1_type_tag.to_string());
-    let a2_index = find_arithmetic_type_index(&a2_type_tag.to_string());
-    let get = move |args: List| optable("lookup").call(&args);
-    fn raise_helper(
-        x: &List,
-        index_diff: i32,
-        get: impl Fn(List) -> Option<List> + 'static + Clone,
-    ) -> List {
-        if index_diff <= 0 {
-            x.clone()
-        } else {
-            raise_helper(&raise(x, get.clone()), index_diff - 1, get)
-        }
-    }
-    let a1 = if a1_index < a2_index {
-        raise_helper(&a1, a2_index - a1_index, get.clone())
-    } else {
-        a1
-    };
-    let a2 = if a1_index > a2_index {
-        raise_helper(&a2, a1_index - a2_index, get.clone())
-    } else {
-        a2
-    };
-    (a1, a2)
-}
-
-pub fn drop(x: &List, optable: Rc<dyn Fn(&str) -> ClosureWrapper>) -> List {
-    let op_cloned = optable.clone();
-    let get = move |args: List| optable("lookup").call(&args);
-    let new_x = project(x, get.clone());
-    if raise(&new_x, get.clone()) == *x {
-        drop(&new_x, op_cloned)
-    } else {
-        x.clone()
-    }
-}
-pub fn apply_generic_drop_wrapper(
-    op: &List,
-    args: &List,
-    optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
-) -> Option<List> {
-    let op_cloned = optable.clone();
-    let get = move |args: List| optable("lookup").call(&args);
-    let (a1, a2) = (args.head(), args.tail().head());
-    let (a1, a2) = if is_arithmetic_type(&a1) && is_arithmetic_type(&a2) {
-        arithmetic_type_raise(a1.clone(), a2.clone(), op_cloned.clone())
-    } else {
-        (a1.clone(), a2.clone())
-    };
-    let res = apply_generic(op, &list![a1, a2], get);
-    if let Some(res) = res {
-        if is_arithmetic_type(&res) {
-            Some(drop(&res, op_cloned))
-        } else {
-            Some(res)
-        }
-    } else {
-        None
-    }
+    arith.put("mul", list!["polynomial", "polynomial"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args: &List| {
+            let (p1, p2) = (args.head(), args.tail().head());
+            Some(tag(&mul_poly(&p1, &p2, &arith)))
+        })
+    });
+    arith.put(
+        "make_polynomial_from_sparse",
+        list!["polynomial"],
+        ClosureWrapper::new(move |args: &List| {
+            let (variable, term_list) = (args.head(), args.tail().head());
+            Some(tag(&make_poly(variable, term_list)))
+        }),
+    );
+    arith.put("is_equal_to_zero", list!["polynomial"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args: &List| {
+            let term_list = term_list(&args.head());
+            Some(is_equal_to_zero(&term_list, &arith))
+        })
+    });
+    Some("done".to_string().to_listv())
 }
