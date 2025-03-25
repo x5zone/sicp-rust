@@ -713,6 +713,15 @@ pub fn install_rational_package(arith: &ArithmeticContext) -> Option<List> {
             Some((arith.is_equal_to_zero(&n) == true.to_listv()).to_listv())
         })
     });
+    arith.put("netative", list!["rational"], {
+        let (arith, tag) = (arith.clone(), tag.clone());
+        ClosureWrapper::new(move |args| {
+            // 调用链中有apply_generic的调用，需要使用 tag 函数重新附加数据类型标签
+            let n = arith.numer(&tag(args.head()));
+            let d = arith.denom(&tag(args.head()));
+            Some(make_rational(arith.negative(&n), d, &arith))
+        })
+    });
     arith.put("raise", list!["rational"], {
         let arith = arith.clone();
         ClosureWrapper::new(move |args| {
@@ -1152,6 +1161,17 @@ pub fn install_complex_package(arith: &ArithmeticContext) -> Option<List> {
             Some(make_complex_from_real_imag(m, a, &arith))
         })
     });
+    arith.put("negative", list!["complex"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args| {
+            let (r, i) = (arith.real_part(&args.head()), arith.imag_part(&args.head()));
+            Some(make_complex_from_real_imag(
+                arith.negative(&r),
+                arith.negative(&i),
+                &arith,
+            ))
+        })
+    });
     arith.put("is_equal", list!["complex", "complex"], {
         let arith = arith.clone();
         ClosureWrapper::new(move |args| Some(arith.is_equal(&args.head(), &args.tail().head())))
@@ -1260,6 +1280,7 @@ fn add_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
         }
     }
 }
+
 fn mul_term_by_all_terms(t1: &List, l: &List, arith: &ArithmeticContext) -> List {
     if is_empty_term_list(&l) {
         List::Nil
@@ -1308,11 +1329,10 @@ pub fn pretty_polynomial(p: &List) -> String {
         }
     }
     if term_list(&contents(&p)).is_empty() {
-        format!("({}:{})",type_tag(p), term_list(&contents(p)))
+        format!("({}:{})", type_tag(p), term_list(&contents(p)))
     } else {
         format!("({}:{})", type_tag(p), iter(&term_list(&contents(p))))
     }
-    
 }
 pub fn install_polynomial_sparse_package(arith: &ArithmeticContext) -> Option<List> {
     // internal functions
@@ -1357,6 +1377,15 @@ pub fn install_polynomial_sparse_package(arith: &ArithmeticContext) -> Option<Li
             }
         }
     }
+    fn negative_terms(l: &List, arith: &ArithmeticContext) -> List {
+        if is_empty_term_list(&l) {
+            List::Nil
+        } else {
+            let t1 = first_term(&l);
+            let t1 = make_term(order(&t1), arith.negative(&coeff(&t1)));
+            adjoin_term(t1, negative_terms(&rest_terms(&l), &arith), &arith)
+        }
+    }
     fn tag(x: &List) -> List {
         attach_tag("polynomial", x)
     }
@@ -1389,6 +1418,26 @@ pub fn install_polynomial_sparse_package(arith: &ArithmeticContext) -> Option<Li
         ClosureWrapper::new(move |args: &List| {
             let term_list = term_list(&args.head());
             Some(is_equal_to_zero(&term_list, &arith))
+        })
+    });
+    arith.put("negative", list!["polynomial"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args: &List| {
+            let variable = variable(&args.head());
+            let term_list = term_list(&args.head());
+            Some(tag(&make_poly(
+                variable,
+                negative_terms(&term_list, &arith),
+            )))
+        })
+    });
+    arith.put("sub", list!["polynomial", "polynomial"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args: &List| {
+            let (p1, p2) = (args.head(), args.tail().head());
+            // 需要补上被apply_generic剥去的标签
+            let (p1, p2) = (tag(&p1), arith.negative(&tag(&p2)));
+            Some(arith.add(&p1, &p2))
         })
     });
     Some("done".to_string().to_listv())
