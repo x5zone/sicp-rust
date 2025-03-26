@@ -1,6 +1,8 @@
 use sicp_rs::{
     ch2::ch2_5::{
-        attach_tag, coeff, contents, install_arithmetic_package, is_empty_term_list, is_same_variable, make_integer, make_poly, make_term, order, rest_terms, term_list, type_tag, variable, ArithmeticContext
+        ArithmeticContext, attach_tag, coeff, contents, install_arithmetic_package,
+        is_empty_term_list, is_same_variable, make_integer, make_poly, make_term, order,
+        rest_terms, term_list, type_tag, variable,
     },
     prelude::*,
 };
