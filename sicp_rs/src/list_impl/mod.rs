@@ -308,11 +308,14 @@ impl List {
                     List::extract_clone(next).accumulate(f, initial),
                 )
             }
-            List::V(_) => unreachable_with_location("Accumulate only accept list", &self),
-            //{
-            //  eprintln!("accumulate only accept list, not value");
-            //  fun(self, initial)},
-            //}
+            List::V(_) => {
+                //unreachable_with_location("Accumulate only accept list", &self),
+                eprintln!(
+                    "Warning: accumulate only accepts list, not value. May caused by pair construct not ending with Nil."
+                );
+                fun(self, initial)
+            }
+            
         }
     }
     pub fn filter<F>(&self, fun: F) -> List
@@ -365,7 +368,13 @@ impl List {
                     op(result, &List::extract_clone(value)),
                     &List::extract_clone(next),
                 ),
-                List::V(_) => unreachable_with_location("Flod_left only accept list", &rest),
+                List::V(_) => {
+                   // unreachable_with_location("Flod_left only accept list", &rest)},
+                    eprintln!(
+                        "Warning: fold_left only accepts list, not value. May caused by pair construct not ending with Nil."
+                    );
+                    op(result, &rest)
+                }
             }
         }
         iter(fun, initial, self)
@@ -385,10 +394,13 @@ impl List {
                     .accumulate_n(op.clone(), initial.clone());
                 List::pair(l1, l2)
             }
-            List::V(_) => unreachable_with_location("Accumulate_n only accept list", &self),
-            //  eprintln!("accumulate_n only accept list, not value");
-            //  fun(self, initial)},
-            //}
+            List::V(_) => {
+                //unreachable_with_location("Accumulate_n only accept list", &self)
+                panic!(
+                    "Error: accumulate_n only accepts list, not value. May caused by pair construct not ending with Nil."
+                );
+            },
+          
         }
     }
     fn reverse_with<F: Fn(&List) -> List>(&self, fun: F) -> Self {

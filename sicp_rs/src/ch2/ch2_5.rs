@@ -1224,32 +1224,32 @@ pub fn is_same_variable(v1: &List, v2: &List) -> bool {
     is_variable(v1) && is_variable(v2) && v1 == v2
 }
 // representation of poly
-fn make_poly(variable: List, term_list: List) -> List {
+pub fn make_poly(variable: List, term_list: List) -> List {
     pair![variable, term_list]
 }
-fn variable(p: &List) -> List {
+pub fn variable(p: &List) -> List {
     p.head()
 }
-fn term_list(p: &List) -> List {
+pub fn term_list(p: &List) -> List {
     p.tail()
 }
 // representation of terms and term lists
-fn order(term: &List) -> List {
+pub fn order(term: &List) -> List {
     term.head()
 }
-fn coeff(term: &List) -> List {
+pub fn coeff(term: &List) -> List {
     term.tail().head()
 }
 pub fn make_term(order: List, coeff: List) -> List {
     list![order, coeff]
 }
-fn is_empty_term_list(term_list: &List) -> bool {
+pub fn is_empty_term_list(term_list: &List) -> bool {
     term_list.is_empty()
 }
 fn first_term(term_list: &List) -> List {
     term_list.head()
 }
-fn rest_terms(term_list: &List) -> List {
+pub fn rest_terms(term_list: &List) -> List {
     term_list.tail()
 }
 fn adjoin_term(term: List, term_list: List, arith: &ArithmeticContext) -> List {
