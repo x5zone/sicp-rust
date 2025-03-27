@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::{fmt, i32};
 
@@ -64,7 +65,6 @@ pub fn apply_generic(op: &List, args: &List, arith: &ArithmeticContext) -> Optio
                 op
             );
         }
-
         let type1 = type_tags.head();
         let type2 = type_tags.tail().head();
         assert_ne!(type1, type2, "no method found for op:{}, args:{}", op, args);
@@ -78,7 +78,6 @@ pub fn apply_generic(op: &List, args: &List, arith: &ArithmeticContext) -> Optio
             let (a1, a2) = unify_arithmetic_types(a1, a2, arith);
             return apply_generic(op, &list![a1, a2], arith);
         }
-
         // 类型强制
         let try_coerce_and_apply = |t1: &List, t2: &List, a1: &List, a2: &List, direction: i32| {
             if let Some(t1_to_t2) = arith.get_coercion(t1, t2) {
@@ -94,6 +93,7 @@ pub fn apply_generic(op: &List, args: &List, arith: &ArithmeticContext) -> Optio
                 };
                 apply_generic(op, &list![a1, a2], arith)
             } else {
+                println!("coerce {} -> {}??????{}", t1, t2, arith.coercion.borrow());
                 None
             }
         };
@@ -159,7 +159,7 @@ pub struct ArithmeticContext {
     // 这是所有的操作函数的表格
     pub optable: Rc<dyn Fn(&str) -> ClosureWrapper>,
     // 这是类型转换的表格
-    pub coercion: List,
+    pub coercion: Rc<RefCell<List>>,
 }
 macro_rules! define_methods {
     ($($fn_name:ident, $op_name:expr, 2);* $(;)?) => {
@@ -181,7 +181,7 @@ impl ArithmeticContext {
     pub fn new() -> Self {
         ArithmeticContext {
             optable: make_table_2d(),
-            coercion: List::Nil,
+            coercion: Rc::new(RefCell::new(List::Nil)),
         }
     }
     pub fn get(&self, keys: List) -> Option<ClosureWrapper> {
@@ -293,10 +293,9 @@ impl ArithmeticContext {
         proc: ClosureWrapper,
     ) -> Option<List> {
         if self.get_coercion(type1, type2).is_none() {
-            self.coercion = pair![
-                list![type1.clone(), type2.clone(), proc],
-                self.coercion.clone()
-            ]
+            let old_coercion = self.coercion.borrow().clone();
+            let mut coercion = self.coercion.borrow_mut();
+            *coercion = pair![list![type1.clone(), type2.clone(), proc], old_coercion]
         }
         Some("done".to_listv())
     }
@@ -331,7 +330,7 @@ impl ArithmeticContext {
                 }
             }
         }
-        get_coercion_iter(type1, type2, &self.coercion)
+        get_coercion_iter(type1, type2, &self.coercion.borrow().clone())
     }
     pub fn apply_generic(&self, op: &'static str, args: &List) -> Option<List> {
         apply_generic(&op.to_listv(), args, self)
@@ -1277,7 +1276,9 @@ pub fn is_variable(x: &List) -> bool {
     x.is_string_value()
 }
 pub fn is_same_variable(v1: &List, v2: &List) -> bool {
-    is_variable(v1) && is_variable(v2) && v1 == v2
+    is_variable(v1)
+        && is_variable(v2)
+        && (v1 == v2 || v1 == &"any".to_listv() || v2 == &"any".to_listv())
 }
 // representation of poly
 pub fn make_poly(variable: List, term_list: List) -> List {
@@ -1286,6 +1287,15 @@ pub fn make_poly(variable: List, term_list: List) -> List {
 /// (x, [sparse, term_list]) -> x
 pub fn variable(p: &List) -> List {
     p.head()
+}
+/// may be integer + poly and integer with variable any
+/// integer -> (poly, (any, (0, integer))) as poly: any^0 * integer  
+pub fn variable_not_any(p1: &List, p2: &List) -> List {
+    if variable(p1) == "any".to_listv() {
+        variable(p2)
+    } else {
+        variable(p1)
+    }
 }
 // (x, [sparse, term_list]) -> [sparse, term_list]
 pub fn term_list(p: &List) -> List {
@@ -1323,9 +1333,9 @@ pub fn pure_first_term(first_term: &List) -> List {
 }
 pub fn pretty_polynomial(p: &List, arith: &ArithmeticContext) -> String {
     // (polynomial, x, sparse, (2, 4), (1, 3), (0, 7.0))
-    fn iter(term_list: &List, arith: &ArithmeticContext) -> String {
+    fn iter(var_name: &List, term_list: &List, arith: &ArithmeticContext) -> String {
         if is_empty_term_list(&term_list) {
-            return "".to_string();
+            return "0".to_string();
         }
         let t1 = arith.first_term(term_list); // (sparse, (2, 4))
         let order1 = order(&contents(&t1).head());
@@ -1339,10 +1349,11 @@ pub fn pretty_polynomial(p: &List, arith: &ArithmeticContext) -> String {
             coeff1_str
         } else {
             format!(
-                "{}x^{} + {}",
+                "{}{}^{} + {}",
                 coeff1_str,
+                var_name,
                 order1,
-                iter(&arith.rest_terms(term_list), arith)
+                iter(var_name, &arith.rest_terms(term_list), arith)
             )
         }
     }
@@ -1350,7 +1361,11 @@ pub fn pretty_polynomial(p: &List, arith: &ArithmeticContext) -> String {
     if contents(&tl).is_empty() {
         format!("({}:{})", type_tag(p), contents(&tl))
     } else {
-        format!("({}:{})", type_tag(p), iter(&tl, arith))
+        format!(
+            "({}:{})",
+            type_tag(p),
+            iter(&variable(&contents(&p)), &tl, arith)
+        )
     }
 }
 pub fn install_sparse_terms_package(arith: &ArithmeticContext) -> Option<List> {
@@ -1478,7 +1493,28 @@ pub fn install_dense_terms_package(arith: &ArithmeticContext) -> Option<List> {
     });
     Some("done".to_string().to_listv())
 }
+pub fn install_polynomial_coercion(arith: &mut ArithmeticContext) -> Option<List> {
+    let mut put_helper = |type_x| {
+        arith.put_coercion(&type_x, &"polynomial".to_listv(), {
+            let arith = arith.clone();
+            ClosureWrapper::new(move |args| {
+                let x = args.head();
 
+                Some(make_polynomial_from_sparse(
+                    &"any".to_listv(),
+                    &list![make_term(0.to_listv(), x,)],
+                    &arith,
+                ))
+            })
+        })
+    };
+    put_helper("integer".to_listv());
+    put_helper("float".to_listv());
+    put_helper("rational".to_listv());
+    put_helper("complex".to_listv());
+
+    Some("done".to_string().to_listv())
+}
 pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
     fn add_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
         if is_empty_term_list(l1) {
@@ -1583,45 +1619,72 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             arith.adjoin_term(&first_term, &negative_terms(&arith.rest_terms(l), &arith))
         }
     }
+    fn align_variable(var_x: &List, p2: &List, arith: &ArithmeticContext) -> List {
+        // (y, (sparse, term_list)) -> (poly, y, (sparse, term_list))) and now can use as coeff
+        let p2 = tag(p2);
+        // return (x, (sparse, [[0, y_poly as coeff]])
+        make_poly(
+            var_x.clone(),
+            make_terms_from_sparse(&list![make_term(0.to_listv(), p2)], arith),
+        )
+    }
     fn add_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
         if is_same_variable(&variable(p1), &variable(p2)) {
             make_poly(
-                variable(p1),
+                variable_not_any(p1, p2),
                 add_terms(&term_list(p1), &term_list(p2), arith),
             )
         } else {
-            panic!(
-                "{} Polys not in same var -- ADD-POLY",
-                list![p1.clone(), p2.clone()]
-            )
+            let (p1, p2) = if variable(p1).get_basis_value() < variable(p2).get_basis_value() {
+                (p1.clone(), align_variable(&variable(p1), p2, arith))
+            } else {
+                (align_variable(&variable(p2), p1, arith), p1.clone())
+            };
+            add_poly(&p1, &p2, arith)
+            // panic!(
+            //     "{} Polys not in same var -- ADD-POLY",
+            //     list![p1.clone(), p2.clone()]
+            // )
         }
     }
 
     fn mul_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
         if is_same_variable(&variable(p1), &variable(p2)) {
             make_poly(
-                variable(p1),
+                variable_not_any(p1, p2),
                 mul_terms(&term_list(p1), &term_list(p2), arith),
             )
         } else {
-            panic!(
-                "{} Polys not in same var -- MUL-POLY",
-                list![p1.clone(), p2.clone()]
-            )
+            let (p1, p2) = if variable(p1).get_basis_value() < variable(p2).get_basis_value() {
+                (p1.clone(), align_variable(&variable(p1), p2, arith))
+            } else {
+                (align_variable(&variable(p2), p1, arith), p1.clone())
+            };
+            mul_poly(&p1, &p2, arith)
+            // panic!(
+            //     "{} Polys not in same var -- MUL-POLY",
+            //     list![p1.clone(), p2.clone()]
+            // )
         }
     }
     fn div_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
         if is_same_variable(&variable(p1), &variable(p2)) {
             let result = div_terms(&term_list(p1), &term_list(p2), arith);
             list![
-                make_poly(variable(p1), result.head(),),
-                make_poly(variable(p1), result.tail().head(),),
+                make_poly(variable_not_any(p1, p2),result.head(),),
+                make_poly(variable_not_any(p1, p2), result.tail().head(),),
             ]
         } else {
-            panic!(
-                "{} Polys not in same var -- DIV-POLY",
-                list![p1.clone(), p2.clone()]
-            )
+            let (p1, p2) = if variable(p1).get_basis_value() < variable(p2).get_basis_value() {
+                (p1.clone(), align_variable(&variable(p1), p2, arith))
+            } else {
+                (align_variable(&variable(p2), p1, arith), p1.clone())
+            };
+            mul_poly(&p1, &p2, arith)
+            // panic!(
+            //     "{} Polys not in same var -- DIV-POLY",
+            //     list![p1.clone(), p2.clone()]
+            // )
         }
     }
     fn is_equal_to_zero(term_list: &List, arith: &ArithmeticContext) -> List {
@@ -1661,13 +1724,17 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         if is_same_variable(&variable(p1), &variable(p2)) {
             is_equal_terms(&term_list(p1), &term_list(p2), arith)
         } else {
-            false.to_listv()
+            let (p1, p2) = if variable(p1).get_basis_value() < variable(p2).get_basis_value() {
+                (p1.clone(), align_variable(&variable(p1), p2, arith))
+            } else {
+                (align_variable(&variable(p2), p1, arith), p1.clone())
+            };
+            is_equal_poly(&p1, &p2, arith)
         }
     }
     fn tag(x: &List) -> List {
         attach_tag("polynomial", x)
     }
-
     arith.put("add", list!["polynomial", "polynomial"], {
         let arith = arith.clone();
         ClosureWrapper::new(move |args: &List| {
