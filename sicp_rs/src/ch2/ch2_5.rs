@@ -1324,6 +1324,9 @@ pub fn pure_first_term(first_term: &List) -> List {
 pub fn pretty_polynomial(p: &List, arith: &ArithmeticContext) -> String {
     // (polynomial, x, sparse, (2, 4), (1, 3), (0, 7.0))
     fn iter(term_list: &List, arith: &ArithmeticContext) -> String {
+        if is_empty_term_list(&term_list) {
+            return "".to_string();
+        }
         let t1 = arith.first_term(term_list); // (sparse, (2, 4))
         let order1 = order(&contents(&t1).head());
         let coeff1 = coeff(&contents(&t1).head());
@@ -1536,6 +1539,38 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             )
         }
     }
+    fn div_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
+        if is_empty_term_list(l1) {
+            list![make_empty_term_list(arith), make_empty_term_list(arith)] //[sparse, List::Nil]
+        } else {
+            let t1 = arith.first_term(&l1);
+            let (order1, coeff1) = (order(&pure_first_term(&t1)), coeff(&pure_first_term(&t1)));
+            let t2 = arith.first_term(&l2);
+            let (order2, coeff2) = (order(&pure_first_term(&t2)), coeff(&pure_first_term(&t2)));
+            if order2.get_basis_value() > order1.get_basis_value() {
+                list![
+                    make_empty_term_list(arith), //[sparse, List::Nil]
+                    l1.clone()
+                ]
+            } else {
+                let new_c = arith.div(&coeff1, &coeff2);
+                let new_o = arith.sub(&order1, &order2);
+
+                let first_term = make_terms_from_sparse(&list![make_term(new_o, new_c)], arith);
+                let divisor = add_terms(
+                    l1,
+                    &negative_terms(&mul_terms(&first_term, l2, arith), arith),
+                    arith,
+                );
+
+                let rest_of_result = div_terms(&divisor, l2, arith);
+                list![
+                    add_terms(&first_term, &rest_of_result.head(), arith),
+                    rest_of_result.tail().head()
+                ]
+            }
+        }
+    }
     fn negative_terms(l: &List, arith: &ArithmeticContext) -> List {
         if is_empty_term_list(l) {
             make_empty_term_list(arith) //[sparse, List::Nil]
@@ -1575,6 +1610,20 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             )
         }
     }
+    fn div_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
+        if is_same_variable(&variable(p1), &variable(p2)) {
+            let result = div_terms(&term_list(p1), &term_list(p2), arith);
+            list![
+                make_poly(variable(p1), result.head(),),
+                make_poly(variable(p1), result.tail().head(),),
+            ]
+        } else {
+            panic!(
+                "{} Polys not in same var -- DIV-POLY",
+                list![p1.clone(), p2.clone()]
+            )
+        }
+    }
     fn is_equal_to_zero(term_list: &List, arith: &ArithmeticContext) -> List {
         if is_empty_term_list(term_list) {
             true.to_listv()
@@ -1588,7 +1637,33 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             }
         }
     }
-
+    fn is_equal_terms(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
+        match (is_empty_term_list(&p1), is_empty_term_list(&p2)) {
+            (true, true) => true.to_listv(),
+            (true, false) => false.to_listv(),
+            (false, true) => false.to_listv(),
+            (false, false) => {
+                let t1 = arith.first_term(&p1);
+                let (order1, coeff1) = (order(&pure_first_term(&t1)), coeff(&pure_first_term(&t1)));
+                let t2 = arith.first_term(&p2);
+                let (order2, coeff2) = (order(&pure_first_term(&t2)), coeff(&pure_first_term(&t2)));
+                if arith.is_equal(&order1, &order2) == true.to_listv()
+                    && arith.is_equal(&coeff1, &coeff2) == true.to_listv()
+                {
+                    is_equal_terms(&arith.rest_terms(p1), &arith.rest_terms(p2), arith)
+                } else {
+                    false.to_listv()
+                }
+            }
+        }
+    }
+    fn is_equal_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
+        if is_same_variable(&variable(p1), &variable(p2)) {
+            is_equal_terms(&term_list(p1), &term_list(p2), arith)
+        } else {
+            false.to_listv()
+        }
+    }
     fn tag(x: &List) -> List {
         attach_tag("polynomial", x)
     }
@@ -1608,12 +1683,26 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             Some(tag(&mul_poly(&p1, &p2, &arith)))
         })
     });
-
+    arith.put("div", list!["polynomial", "polynomial"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args: &List| {
+            let (p1, p2) = (args.head(), args.tail().head());
+            let result = div_poly(&p1, &p2, &arith);
+            Some(list![tag(&result.head()), tag(&result.tail().head())])
+        })
+    });
     arith.put("is_equal_to_zero", list!["polynomial"], {
         let arith = arith.clone();
         ClosureWrapper::new(move |args: &List| {
             let term_list = term_list(&args.head());
             Some(is_equal_to_zero(&term_list, &arith))
+        })
+    });
+    arith.put("is_equal", list!["polynomial", "polynomial"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args: &List| {
+            let (p1, p2) = (args.head(), args.tail().head());
+            Some(is_equal_poly(&p1, &p2, &arith))
         })
     });
     arith.put("negative", list!["polynomial"], {
