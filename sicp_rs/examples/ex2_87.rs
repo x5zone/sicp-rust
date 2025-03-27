@@ -75,6 +75,7 @@ fn main() {
         ],
         &arith,
     );
+
     println!(
         "zero {} is_equal_to_zero {}, as coeff: {}\n {} + {} = {}",
         pretty_polynomial(&zero, &arith),
@@ -84,7 +85,7 @@ fn main() {
         pretty_polynomial(&p3, &arith),
         pretty_polynomial(&arith.add(&p3, &p3), &arith)
     );
-    let zero = make_polynomial_from_sparse(&"x".to_listv(), &list![], &arith);
+    let zero = make_polynomial_from_sparse(&"x".to_listv(), &List::Nil, &arith);
     let p3 = make_polynomial_from_sparse(
         &"x".to_listv(),
         &list![

@@ -1640,13 +1640,15 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         let arith = arith.clone();
         ClosureWrapper::new(move |args: &List| {
             let (variable, term_list) = (args.head(), args.tail().head());
-            let term_list = if type_tag(&term_list) == "sparse".to_listv() {
+            let term_list = if term_list.is_empty() {
+                make_terms_from_dense(&term_list, &arith)
+            } else if type_tag(&term_list) == "sparse".to_listv() {
                 eprintln!("warning: try to make dense terms, but found sparse terms arg");
                 term_list
             } else if type_tag(&term_list) == "dense".to_listv() {
                 term_list
             } else {
-                make_terms_from_sparse(&term_list, &arith)
+                make_terms_from_dense(&term_list, &arith)
             };
             Some(tag(&make_poly(variable, term_list)))
         })
@@ -1655,7 +1657,9 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         let arith = arith.clone();
         ClosureWrapper::new(move |args: &List| {
             let (variable, term_list) = (args.head(), args.tail().head());
-            let term_list = if type_tag(&term_list) == "sparse".to_listv() {
+            let term_list = if term_list.is_empty() {
+                make_terms_from_sparse(&term_list, &arith)
+            } else if type_tag(&term_list) == "sparse".to_listv() {
                 term_list
             } else if type_tag(&term_list) == "dense".to_listv() {
                 eprintln!("warning: try to make sparse terms, but found dense terms arg");

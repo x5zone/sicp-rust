@@ -35,10 +35,12 @@ fn main() {
     );
     let sparse_poly = make_polynomial_from_sparse(&"x".to_listv(), &sparse_term_list, &arith);
     let dense_poly = make_polynomial_from_dense(&"x".to_listv(), &dense_term_list, &arith);
+    println!("Sparse Polynomial: {}", sparse_poly);
     println!(
         "Sparse Polynomial: {}",
         pretty_polynomial(&sparse_poly, &arith)
     );
+    println!("Dense Polynomial: {}", dense_poly);
     println!(
         "Dense Polynomial: {}",
         pretty_polynomial(&dense_poly, &arith)
