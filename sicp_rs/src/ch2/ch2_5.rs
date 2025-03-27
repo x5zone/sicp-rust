@@ -57,7 +57,12 @@ pub fn apply_generic(op: &List, args: &List, arith: &ArithmeticContext) -> Optio
         func.call(&args.map(|x| contents(x)))
     } else {
         if args.length() != 2 {
-            panic!("apply_generic expects 2 args, got {} with op {}", args, op);
+            panic!(
+                "apply_generic expects 2 args, got {} len {} with op {}, may not found method",
+                args,
+                args.length(),
+                op
+            );
         }
 
         let type1 = type_tags.head();
@@ -250,25 +255,18 @@ impl ArithmeticContext {
         );
         self.apply_generic(&"sqrt", &list![x.clone()]).unwrap()
     }
-    // term_list support
-    pub fn add_terms(&self, t1: &List, t2: &List) -> List {
-        self.apply_generic(&"add_terms", &list![t1.clone(), t2.clone()])
-            .unwrap()
-    }
-    pub fn mul_terms(&self, t1: &List, t2: &List) -> List {
-        self.apply_generic(&"mul_terms", &list![t1.clone(), t2.clone()])
-            .unwrap()
-    }
+    /// term_list support
+    /// always return sparse term_list, as [sparse, [term]], not [sparse, term], use contents(head(tl)) to get first term
     pub fn first_term(&self, t: &List) -> List {
         self.apply_generic(&"first_term", &list![t.clone()])
             .unwrap()
     }
-    pub fn adjoin_term(&self, t: &List, term_list: &List) -> List {
-        self.apply_generic(&"adjoin_term", &list![t.clone(), term_list.clone()])
+    pub fn rest_terms(&self, t: &List) -> List {
+        self.apply_generic(&"rest_terms", &list![t.clone()])
             .unwrap()
     }
-    pub fn negative_terms(&self, t: &List) -> List {
-        self.apply_generic(&"negative_terms", &list![t.clone()])
+    pub fn adjoin_term(&self, t: &List, term_list: &List) -> List {
+        self.apply_generic(&"adjoin_term", &list![t.clone(), term_list.clone()])
             .unwrap()
     }
     pub fn drop(&self, x: &List) -> List {
@@ -771,7 +769,7 @@ pub fn install_rational_package(arith: &ArithmeticContext) -> Option<List> {
             Some((arith.is_equal_to_zero(&n) == true.to_listv()).to_listv())
         })
     });
-    arith.put("netative", list!["rational"], {
+    arith.put("negative", list!["rational"], {
         let (arith, tag) = (arith.clone(), tag.clone());
         ClosureWrapper::new(move |args| {
             // 调用链中有apply_generic的调用，需要使用 tag 函数重新附加数据类型标签
@@ -1285,9 +1283,11 @@ pub fn is_same_variable(v1: &List, v2: &List) -> bool {
 pub fn make_poly(variable: List, term_list: List) -> List {
     pair![variable, term_list]
 }
+/// (x, [sparse, term_list]) -> x
 pub fn variable(p: &List) -> List {
     p.head()
 }
+// (x, [sparse, term_list]) -> [sparse, term_list]
 pub fn term_list(p: &List) -> List {
     p.tail()
 }
@@ -1301,77 +1301,34 @@ pub fn coeff(term: &List) -> List {
 pub fn make_term(order: List, coeff: List) -> List {
     list![order, coeff]
 }
+// term_list [sparse, [term...]]
 pub fn is_empty_term_list(term_list: &List) -> bool {
-    term_list.is_empty()
+    contents(term_list).is_empty()
 }
-fn first_term(term_list: &List) -> List {
-    term_list.head()
+pub fn make_empty_term_list(arith: &ArithmeticContext) -> List {
+    make_terms_from_sparse(&List::Nil, arith)
 }
+// term_list [term...]
 pub fn rest_terms(term_list: &List) -> List {
-    term_list.tail()
-}
-fn adjoin_term(term: List, term_list: List, arith: &ArithmeticContext) -> List {
-    if arith.is_equal_to_zero(&coeff(&term)) == true.to_listv() {
-        term_list
-    } else {
-        pair![term, term_list]
-    }
-}
-fn add_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
-    if is_empty_term_list(&l1) {
-        l2.clone()
-    } else if is_empty_term_list(&l2) {
-        l1.clone()
-    } else {
-        let t1 = first_term(&l1);
-        let t2 = first_term(&l2);
-        if order(&t1).get_basis_value() > order(&t2).get_basis_value() {
-            adjoin_term(t1, add_terms(&rest_terms(&l1), l2, &arith), &arith)
-        } else if order(&t1).get_basis_value() < order(&t2).get_basis_value() {
-            adjoin_term(t2, add_terms(l1, &rest_terms(&l2), &arith), &arith)
-        } else {
-            adjoin_term(
-                make_term(order(&t1), arith.add(&coeff(&t1), &coeff(&t2))),
-                add_terms(&rest_terms(&l1), &rest_terms(&l2), &arith),
-                &arith,
-            )
-        }
-    }
-}
-
-fn mul_term_by_all_terms(t1: &List, l: &List, arith: &ArithmeticContext) -> List {
-    if is_empty_term_list(&l) {
+    if term_list.is_empty() {
         List::Nil
     } else {
-        let t2 = first_term(&l);
-        adjoin_term(
-            make_term(
-                arith.add(&order(&t1), &order(&t2)),
-                arith.mul(&coeff(&t1), &coeff(&t2)),
-            ),
-            mul_term_by_all_terms(&t1, &rest_terms(&l), &arith),
-            &arith,
-        )
+        term_list.tail()
     }
 }
-fn mul_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
-    if is_empty_term_list(&l1) {
-        List::Nil
-    } else {
-        add_terms(
-            &mul_term_by_all_terms(&first_term(l1), l2, &arith),
-            &mul_terms(&rest_terms(l1), l2, &arith),
-            &arith,
-        )
-    }
+/// arith.first_term always return sparse term_list, as [sparse, [term]], not [sparse, term]
+/// pure_first_term([sparse, [term]]) -> term
+pub fn pure_first_term(first_term: &List) -> List {
+    contents(first_term).head()
 }
-pub fn pretty_polynomial(p: &List) -> String {
-    fn iter(term_list: &List) -> String {
-        let t1 = first_term(term_list);
-        let order1 = order(&t1);
-        let coeff1 = coeff(&t1);
+pub fn pretty_polynomial(p: &List, arith: &ArithmeticContext) -> String {
+    // (polynomial, x, sparse, (2, 4), (1, 3), (0, 7.0))
+    fn iter(term_list: &List, arith: &ArithmeticContext) -> String {
+        let t1 = arith.first_term(term_list); // (sparse, (2, 4))
+        let order1 = order(&contents(&t1).head());
+        let coeff1 = coeff(&contents(&t1).head());
         let coeff1_str = if type_tag(&coeff1) == "polynomial".to_listv() {
-            pretty_polynomial(&coeff1)
+            pretty_polynomial(&coeff1, arith)
         } else {
             coeff1.to_string()
         };
@@ -1382,223 +1339,26 @@ pub fn pretty_polynomial(p: &List) -> String {
                 "{}x^{} + {}",
                 coeff1_str,
                 order1,
-                iter(&rest_terms(term_list))
+                iter(&arith.rest_terms(term_list), arith)
             )
         }
     }
-    if term_list(&contents(&p)).is_empty() {
-        format!("({}:{})", type_tag(p), term_list(&contents(p)))
+    let tl = term_list(&contents(&p)); // (sparse, (2, 4), (1, 3), (0, 7.0))
+    if contents(&tl).is_empty() {
+        format!("({}:{})", type_tag(p), contents(&tl))
     } else {
-        format!("({}:{})", type_tag(p), iter(&term_list(&contents(p))))
-    }
-}
-pub fn install_polynomial_sparse_package(arith: &ArithmeticContext) -> Option<List> {
-    // internal functions
-
-    fn add_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
-        if is_same_variable(&variable(p1), &variable(p2)) {
-            make_poly(
-                variable(p1),
-                add_terms(&term_list(p1), &term_list(p2), &arith),
-            )
-        } else {
-            panic!(
-                "{} Polys not in same var -- ADD-POLY",
-                list![p1.clone(), p2.clone()]
-            )
-        }
-    }
-
-    fn mul_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
-        if is_same_variable(&variable(p1), &variable(p2)) {
-            make_poly(
-                variable(p1),
-                mul_terms(&term_list(p1), &term_list(p2), &arith),
-            )
-        } else {
-            panic!(
-                "{} Polys not in same var -- MUL-POLY",
-                list![p1.clone(), p2.clone()]
-            )
-        }
-    }
-    fn is_equal_to_zero(term_list: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(term_list) {
-            true.to_listv()
-        } else {
-            // may be (polynomial:0x^2 + 0x^1 + 0)
-            let t = first_term(term_list);
-            if arith.is_equal_to_zero(&coeff(&t)) == false.to_listv() {
-                false.to_listv()
-            } else {
-                is_equal_to_zero(&rest_terms(term_list), &arith)
-            }
-        }
-    }
-    fn negative_terms(l: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(&l) {
-            List::Nil
-        } else {
-            let t1 = first_term(&l);
-            let t1 = make_term(order(&t1), arith.negative(&coeff(&t1)));
-            adjoin_term(t1, negative_terms(&rest_terms(&l), &arith), &arith)
-        }
-    }
-    fn tag(x: &List) -> List {
-        attach_tag("polynomial", x)
-    }
-
-    arith.put("add", list!["polynomial", "polynomial"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let (p1, p2) = (args.head(), args.tail().head());
-            Some(tag(&add_poly(&p1, &p2, &arith)))
-        })
-    });
-
-    arith.put("mul", list!["polynomial", "polynomial"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let (p1, p2) = (args.head(), args.tail().head());
-            Some(tag(&mul_poly(&p1, &p2, &arith)))
-        })
-    });
-    arith.put(
-        "make_polynomial_from_sparse",
-        list!["polynomial"],
-        ClosureWrapper::new(move |args: &List| {
-            let (variable, term_list) = (args.head(), args.tail().head());
-            Some(tag(&make_poly(variable, term_list)))
-        }),
-    );
-    arith.put("is_equal_to_zero", list!["polynomial"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let term_list = term_list(&args.head());
-            Some(is_equal_to_zero(&term_list, &arith))
-        })
-    });
-    arith.put("negative", list!["polynomial"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let variable = variable(&args.head());
-            let term_list = term_list(&args.head());
-            Some(tag(&make_poly(
-                variable,
-                negative_terms(&term_list, &arith),
-            )))
-        })
-    });
-    arith.put("sub", list!["polynomial", "polynomial"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let (p1, p2) = (args.head(), args.tail().head());
-            // 需要补上被apply_generic剥去的标签
-            let (p1, p2) = (tag(&p1), arith.negative(&tag(&p2)));
-            Some(arith.add(&p1, &p2))
-        })
-    });
-    Some("done".to_string().to_listv())
-}
-// make_poly,variable,term_list shared
-pub fn pretty_polynomial_dense(p: &List) -> String {
-    fn iter(term_list: &List) -> String {
-        let t1 = first_term(term_list);
-        let order1 = order(&t1);
-        let coeff1 = coeff(&t1);
-        let coeff1_str = if type_tag(&coeff1) == "dense".to_listv() {
-            pretty_polynomial_dense(&coeff1)
-        } else {
-            coeff1.to_string()
-        };
-        if order1 == 0.to_listv() {
-            coeff1_str
-        } else {
-            format!(
-                "{}x^{} + {}",
-                coeff1_str,
-                order1,
-                iter(&rest_terms(term_list))
-            )
-        }
-    }
-    if term_list(&contents(&p)).is_empty() {
-        format!("({}:{})", type_tag(p), term_list(&contents(p)))
-    } else {
-        format!("({}:{})", type_tag(p), iter(&term_list(&contents(p))))
+        format!("({}:{})", type_tag(p), iter(&tl, arith))
     }
 }
 pub fn install_sparse_terms_package(arith: &ArithmeticContext) -> Option<List> {
-    fn order(term: &List) -> List {
-        term.head()
-    }
-    fn coeff(term: &List) -> List {
-        term.tail().head()
-    }
     fn first_term(term_list: &List) -> List {
         term_list.head()
     }
     fn adjoin_term(term: List, term_list: List, arith: &ArithmeticContext) -> List {
         if arith.is_equal_to_zero(&coeff(&term)) == true.to_listv() {
-            term_list
+            term_list.clone()
         } else {
-            pair![term, term_list]
-        }
-    }
-    fn add_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(&l1) {
-            l2.clone()
-        } else if is_empty_term_list(&l2) {
-            l1.clone()
-        } else {
-            let t1 = first_term(&l1);
-            let t2 = first_term(&l2);
-            if order(&t1).get_basis_value() > order(&t2).get_basis_value() {
-                adjoin_term(t1, add_terms(&rest_terms(&l1), l2, &arith), &arith)
-            } else if order(&t1).get_basis_value() < order(&t2).get_basis_value() {
-                adjoin_term(t2, add_terms(l1, &rest_terms(&l2), &arith), &arith)
-            } else {
-                adjoin_term(
-                    make_term(order(&t1), arith.add(&coeff(&t1), &coeff(&t2))),
-                    add_terms(&rest_terms(&l1), &rest_terms(&l2), &arith),
-                    &arith,
-                )
-            }
-        }
-    }
-    fn mul_term_by_all_terms(t1: &List, l: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(&l) {
-            List::Nil
-        } else {
-            let t2 = first_term(&l);
-            adjoin_term(
-                make_term(
-                    arith.add(&order(&t1), &order(&t2)),
-                    arith.mul(&coeff(&t1), &coeff(&t2)),
-                ),
-                mul_term_by_all_terms(&t1, &rest_terms(&l), &arith),
-                &arith,
-            )
-        }
-    }
-    fn mul_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(&l1) {
-            List::Nil
-        } else {
-            add_terms(
-                &mul_term_by_all_terms(&first_term(l1), l2, &arith),
-                &mul_terms(&rest_terms(l1), l2, &arith),
-                &arith,
-            )
-        }
-    }
-    fn negative_terms(l: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(&l) {
-            List::Nil
-        } else {
-            let t1 = first_term(&l);
-            let t1 = make_term(order(&t1), arith.negative(&coeff(&t1)));
-            adjoin_term(t1, negative_terms(&rest_terms(&l), &arith), &arith)
+            pair![term.clone(), term_list.clone()]
         }
     }
     fn tag(x: &List) -> List {
@@ -1606,48 +1366,26 @@ pub fn install_sparse_terms_package(arith: &ArithmeticContext) -> Option<List> {
     }
     arith.put("first_term", list!["sparse"], {
         ClosureWrapper::new(move |args: &List| {
-            // always return sparse term_list
+            // always return sparse term_list, as [sparse, [term]], not [sparse, term]
+            // head: term_list ;
             let p = args.head();
             let term_list = list![first_term(&p)];
             Some(tag(&term_list))
         })
     });
-    // shared rest_terms
+    arith.put("rest_terms", list!["sparse"], {
+        ClosureWrapper::new(move |args: &List| {
+            // head: term_list ;
+            let p = args.head();
+            let term_list = rest_terms(&p);
+            Some(tag(&term_list))
+        })
+    });
     arith.put("adjoin_term", list!["sparse", "sparse"], {
         let arith = arith.clone();
         ClosureWrapper::new(move |args: &List| {
-            // TODO check t1
             let (t1, l) = (args.head().head(), args.tail().head());
             Some(tag(&adjoin_term(t1, l, &arith)))
-        })
-    });
-    arith.put("add_terms", list!["sparse", "sparse"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let (l1, l2) = (args.head(), args.tail().head());
-            Some(tag(&add_terms(&l1, &l2, &arith)))
-        })
-    });
-    arith.put("mul_term_by_all_terms_dense", list!["sparse", "sparse"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            // TODO check t1
-            let (t1, l) = (args.head().head(), args.tail().head());
-            Some(tag(&mul_term_by_all_terms(&t1, &l, &arith)))
-        })
-    });
-    arith.put("mul_terms", list!["sparse", "sparse"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let (l1, l2) = (args.head(), args.tail().head());
-            Some(tag(&mul_terms(&l1, &l2, &arith)))
-        })
-    });
-    arith.put("negative", list!["sparse"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let p = args.head();
-            Some(tag(&negative_terms(&term_list(&p), &arith)))
         })
     });
     arith.put("make_terms_from_sparse", list!["sparse"], {
@@ -1676,13 +1414,6 @@ pub fn install_dense_terms_package(arith: &ArithmeticContext) -> Option<List> {
     fn first_term_dense(term_list: &List) -> List {
         make_term(order_dense(term_list), coeff_dense(term_list))
     }
-    fn rest_terms_dense(term_list: &List) -> List {
-        if term_list.is_empty() {
-            List::Nil
-        } else {
-            term_list.tail()
-        }
-    }
     fn adjoin_term_dense(term: List, term_list: List, arith: &ArithmeticContext) -> List {
         if arith.is_equal_to_zero(&coeff(&term)) == true.to_listv() {
             term_list
@@ -1707,73 +1438,6 @@ pub fn install_dense_terms_package(arith: &ArithmeticContext) -> Option<List> {
             }
         }
     }
-    fn add_terms_dense(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(&l1) {
-            l2.clone()
-        } else if is_empty_term_list(&l2) {
-            l1.clone()
-        } else {
-            let t1 = first_term_dense(&l1);
-            let t2 = first_term_dense(&l2);
-            if order(&t1).get_basis_value() > order(&t2).get_basis_value() {
-                let x = adjoin_term_dense(
-                    t1.clone(),
-                    add_terms_dense(&rest_terms(&l1), l2, &arith),
-                    &arith,
-                );
-                x
-            } else if order(&t1).get_basis_value() < order(&t2).get_basis_value() {
-                let x = adjoin_term_dense(
-                    t2.clone(),
-                    add_terms_dense(l1, &rest_terms(&l2), &arith),
-                    &arith,
-                );
-                x
-            } else {
-                let x = adjoin_term_dense(
-                    make_term(order(&t1), arith.add(&coeff(&t1), &coeff(&t2))),
-                    add_terms_dense(&rest_terms(&l1), &rest_terms(&l2), &arith),
-                    &arith,
-                );
-                x
-            }
-        }
-    }
-    fn mul_term_by_all_terms_dense(t1: &List, l: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(&l) {
-            List::Nil
-        } else {
-            let t2 = first_term_dense(&l);
-            adjoin_term_dense(
-                make_term(
-                    arith.add(&order(&t1), &order(&t2)),
-                    arith.mul(&coeff(&t1), &coeff(&t2)),
-                ),
-                mul_term_by_all_terms_dense(t1, &rest_terms(&l), &arith),
-                &arith,
-            )
-        }
-    }
-    fn mul_terms_dense(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(&l1) {
-            List::Nil
-        } else {
-            add_terms_dense(
-                &mul_term_by_all_terms_dense(&first_term_dense(&l1), &l2, &arith),
-                &mul_terms_dense(&rest_terms(&l1), &l2, &arith),
-                &arith,
-            )
-        }
-    }
-    fn negative_terms(l: &List, arith: &ArithmeticContext) -> List {
-        if is_empty_term_list(&l) {
-            List::Nil
-        } else {
-            let t1 = first_term_dense(&l);
-            let t1 = make_term(order(&t1), arith.negative(&coeff(&t1)));
-            adjoin_term_dense(t1, negative_terms(&rest_terms(&l), arith), arith)
-        }
-    }
     fn tag(x: &List) -> List {
         attach_tag("dense", x)
     }
@@ -1782,48 +1446,25 @@ pub fn install_dense_terms_package(arith: &ArithmeticContext) -> Option<List> {
     }
     arith.put("first_term", list!["dense"], {
         ClosureWrapper::new(move |args: &List| {
-            // always return sparse term_list
+            // always return sparse term_list, as [sparse, [term]], not [sparse, term]
             let p = args.head();
             let term_list = list![first_term_dense(&p)];
             Some(sparse_tag(&term_list))
         })
     });
-    // shared rest_terms
+    arith.put("rest_terms", list!["dense"], {
+        ClosureWrapper::new(move |args: &List| {
+            // head: term_list ;
+            let p = args.head();
+            let term_list = rest_terms(&p);
+            Some(tag(&term_list))
+        })
+    });
     arith.put("adjoin_term", list!["sparse", "dense"], {
         let arith = arith.clone();
         ClosureWrapper::new(move |args: &List| {
-            // TODO check t1
             let (t1, l) = (args.head().head(), args.tail().head());
             Some(tag(&adjoin_term_dense(t1, l, &arith)))
-        })
-    });
-    arith.put("add_terms", list!["dense", "dense"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let (l1, l2) = (args.head(), args.tail().head());
-            Some(tag(&add_terms_dense(&l1, &l2, &arith)))
-        })
-    });
-    arith.put("mul_term_by_all_terms_dense", list!["sparse", "dense"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            // TODO check t1
-            let (t1, l) = (args.head().head(), args.tail().head());
-            Some(tag(&mul_term_by_all_terms_dense(&t1, &l, &arith)))
-        })
-    });
-    arith.put("mul_terms", list!["dense", "dense"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let (l1, l2) = (args.head(), args.tail().head());
-            Some(tag(&mul_terms_dense(&l1, &l2, &arith)))
-        })
-    });
-    arith.put("negative", list!["dense"], {
-        let arith = arith.clone();
-        ClosureWrapper::new(move |args: &List| {
-            let p = args.head();
-            Some(tag(&negative_terms(&term_list(&p), &arith)))
         })
     });
     arith.put("make_terms_from_dense", list!["dense"], {
@@ -1836,11 +1477,82 @@ pub fn install_dense_terms_package(arith: &ArithmeticContext) -> Option<List> {
 }
 
 pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
+    fn add_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
+        if is_empty_term_list(l1) {
+            l2.clone()
+        } else if is_empty_term_list(l2) {
+            l1.clone()
+        } else {
+            let t1 = arith.first_term(&l1);
+            let (order1, coeff1) = (order(&pure_first_term(&t1)), coeff(&pure_first_term(&t1)));
+            let t2 = arith.first_term(&l2);
+            let (order2, coeff2) = (order(&pure_first_term(&t2)), coeff(&pure_first_term(&t2)));
+
+            if order1.get_basis_value() > order2.get_basis_value() {
+                arith.adjoin_term(&t1, &add_terms(&arith.rest_terms(&l1), l2, arith))
+            } else if order1.get_basis_value() < order2.get_basis_value() {
+                arith.adjoin_term(&t2, &add_terms(l1, &arith.rest_terms(&l2), &arith))
+            } else {
+                let first_term = make_terms_from_sparse(
+                    &list![make_term(order1, arith.add(&coeff1, &coeff2))],
+                    arith,
+                );
+
+                arith.adjoin_term(
+                    &first_term,
+                    &add_terms(&arith.rest_terms(l1), &arith.rest_terms(l2), &arith),
+                )
+            }
+        }
+    }
+    fn mul_term_by_all_terms(t1: &List, l: &List, arith: &ArithmeticContext) -> List {
+        if is_empty_term_list(l) {
+            make_empty_term_list(arith) //[sparse, List::Nil]
+        } else {
+            let (order1, coeff1) = (order(&pure_first_term(&t1)), coeff(&pure_first_term(&t1)));
+            let t2 = arith.first_term(&l);
+            let (order2, coeff2) = (order(&pure_first_term(&t2)), coeff(&pure_first_term(&t2)));
+            let first_term = make_terms_from_sparse(
+                &list![make_term(
+                    arith.add(&order1, &order2),
+                    arith.mul(&coeff1, &coeff2)
+                )],
+                arith,
+            );
+            arith.adjoin_term(
+                &first_term,
+                &mul_term_by_all_terms(&t1, &arith.rest_terms(&l), &arith),
+            )
+        }
+    }
+    fn mul_terms(l1: &List, l2: &List, arith: &ArithmeticContext) -> List {
+        if is_empty_term_list(l1) {
+            make_empty_term_list(arith) //[sparse, List::Nil]
+        } else {
+            add_terms(
+                &mul_term_by_all_terms(&arith.first_term(l1), l2, &arith),
+                &mul_terms(&arith.rest_terms(l1), l2, &arith),
+                &arith,
+            )
+        }
+    }
+    fn negative_terms(l: &List, arith: &ArithmeticContext) -> List {
+        if is_empty_term_list(l) {
+            make_empty_term_list(arith) //[sparse, List::Nil]
+        } else {
+            let t1 = arith.first_term(l);
+            let (order1, coeff1) = (order(&pure_first_term(&t1)), coeff(&pure_first_term(&t1)));
+            let first_term =
+                make_terms_from_sparse(&list![make_term(order1, arith.negative(&coeff1))], arith);
+
+            arith.adjoin_term(&first_term, &negative_terms(&arith.rest_terms(l), &arith))
+        }
+    }
     fn add_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
         if is_same_variable(&variable(p1), &variable(p2)) {
             make_poly(
                 variable(p1),
-                arith.add_terms(&term_list(p1), &term_list(p2)),
+                add_terms(&term_list(p1), &term_list(p2), arith),
             )
         } else {
             panic!(
@@ -1854,7 +1566,7 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         if is_same_variable(&variable(p1), &variable(p2)) {
             make_poly(
                 variable(p1),
-                arith.mul_terms(&term_list(p1), &term_list(p2)),
+                mul_terms(&term_list(p1), &term_list(p2), arith),
             )
         } else {
             panic!(
@@ -1867,18 +1579,18 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         if is_empty_term_list(term_list) {
             true.to_listv()
         } else {
-            // may be (polynomial:0x^2 + 0x^1 + 0)
-            let t = arith.first_term(term_list);
+            // [sparse [term]]-> term
+            let t = pure_first_term(&arith.first_term(term_list)); // [sparse [term]]
             if arith.is_equal_to_zero(&coeff(&t)) == false.to_listv() {
                 false.to_listv()
             } else {
-                is_equal_to_zero(&rest_terms(term_list), &arith)
+                is_equal_to_zero(&arith.rest_terms(term_list), &arith)
             }
         }
     }
 
     fn tag(x: &List) -> List {
-        attach_tag("dense", x)
+        attach_tag("polynomial", x)
     }
 
     arith.put("add", list!["polynomial", "polynomial"], {
@@ -1909,7 +1621,10 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         ClosureWrapper::new(move |args: &List| {
             let variable = variable(&args.head());
             let term_list = term_list(&args.head());
-            Some(tag(&make_poly(variable, arith.negative_terms(&term_list))))
+            Some(tag(&make_poly(
+                variable,
+                negative_terms(&term_list, &arith),
+            )))
         })
     });
     arith.put("sub", list!["polynomial", "polynomial"], {
@@ -1925,8 +1640,14 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         let arith = arith.clone();
         ClosureWrapper::new(move |args: &List| {
             let (variable, term_list) = (args.head(), args.tail().head());
-
-            let term_list = make_terms_from_dense(&term_list, &arith);
+            let term_list = if type_tag(&term_list) == "sparse".to_listv() {
+                eprintln!("warning: try to make dense terms, but found sparse terms arg");
+                term_list
+            } else if type_tag(&term_list) == "dense".to_listv() {
+                term_list
+            } else {
+                make_terms_from_sparse(&term_list, &arith)
+            };
             Some(tag(&make_poly(variable, term_list)))
         })
     });
@@ -1934,8 +1655,14 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         let arith = arith.clone();
         ClosureWrapper::new(move |args: &List| {
             let (variable, term_list) = (args.head(), args.tail().head());
-
-            let term_list = make_terms_from_sparse(&term_list, &arith);
+            let term_list = if type_tag(&term_list) == "sparse".to_listv() {
+                term_list
+            } else if type_tag(&term_list) == "dense".to_listv() {
+                eprintln!("warning: try to make sparse terms, but found dense terms arg");
+                term_list
+            } else {
+                make_terms_from_sparse(&term_list, &arith)
+            };
             Some(tag(&make_poly(variable, term_list)))
         })
     });

@@ -1,8 +1,8 @@
 use sicp_rs::{
     ch2::ch2_5::{
         ArithmeticContext, attach_tag, coeff, contents, install_arithmetic_package,
-        is_empty_term_list, is_same_variable, make_integer, make_poly, make_term, order,
-        rest_terms, term_list, type_tag, variable,
+        is_same_variable, make_integer, make_poly, make_term, order, rest_terms, term_list,
+        type_tag, variable,
     },
     prelude::*,
 };
@@ -24,7 +24,9 @@ fn coeff_dense(term_list: &List) -> List {
 fn first_term_dense(term_list: &List) -> List {
     list![order_dense(term_list), coeff_dense(term_list)]
 }
-
+fn is_empty_term_list(term_list: &List) -> bool {
+    term_list.is_empty()
+}
 fn adjoin_term_dense(term: List, term_list: List, arith: &ArithmeticContext) -> List {
     if arith.is_equal_to_zero(&coeff(&term)) == true.to_listv() {
         term_list

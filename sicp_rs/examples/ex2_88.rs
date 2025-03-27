@@ -1,7 +1,8 @@
 use sicp_rs::{
     ch2::ch2_5::{
-        ArithmeticContext, install_arithmetic_package, install_polynomial_sparse_package,
-        make_float, make_integer, make_polynomial_from_sparse, make_term, pretty_polynomial,
+        ArithmeticContext, install_arithmetic_package, install_polynomial_package,
+        install_sparse_terms_package, make_float, make_integer, make_polynomial_from_sparse,
+        make_term, pretty_polynomial,
     },
     prelude::*,
 };
@@ -9,7 +10,8 @@ use sicp_rs::{
 fn main() {
     let arith = ArithmeticContext::new();
     install_arithmetic_package(&arith);
-    install_polynomial_sparse_package(&arith);
+    install_sparse_terms_package(&arith);
+    install_polynomial_package(&arith);
 
     let p1 = make_polynomial_from_sparse(
         &"x".to_listv(),
@@ -29,10 +31,11 @@ fn main() {
         ],
         &arith,
     );
+    println!("polynomial representation: {}\n", p1.pretty_print());
     println!(
-        " {} - {} = {}",
-        pretty_polynomial(&p1),
-        pretty_polynomial(&p2),
-        pretty_polynomial(&arith.sub(&p1, &p2))
+        "{} - {} = {}",
+        pretty_polynomial(&p1, &arith),
+        pretty_polynomial(&p2, &arith),
+        pretty_polynomial(&arith.sub(&p1, &p2), &arith)
     );
 }
