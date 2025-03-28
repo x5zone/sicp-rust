@@ -1599,13 +1599,13 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
                 let new_o = arith.sub(&order1, &order2);
 
                 let first_term = make_terms_from_sparse(&list![make_term(new_o, new_c)], arith);
-                let divisor = add_terms(
+                let dividend = add_terms(
                     l1,
                     &negative_terms(&mul_terms(&first_term, l2, arith), arith),
                     arith,
                 );
 
-                let rest_of_result = div_terms(&divisor, l2, arith);
+                let rest_of_result = div_terms(&dividend, l2, arith);
                 list![
                     add_terms(&first_term, &rest_of_result.head(), arith),
                     rest_of_result.tail().head()

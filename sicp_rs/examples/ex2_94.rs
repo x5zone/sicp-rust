@@ -50,7 +50,7 @@ fn main() {
     println!("Polynomial p2: {}", pretty_polynomial(&p2, &arith));
     let gcd_poly = arith.gcd(&p1, &p2);
     println!("GCD of p1 and p2: {}", pretty_polynomial(&gcd_poly, &arith));
-    
+
     println!("\n==== Test: Integer and Polynomial GCD ====");
 
     // 测试整数与多项式的最大公约数
