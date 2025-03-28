@@ -255,6 +255,10 @@ impl ArithmeticContext {
         );
         self.apply_generic(&"sqrt", &list![x.clone()]).unwrap()
     }
+    pub fn gcd(&self, x: &List, y: &List) -> List {
+        self.apply_generic(&"gcd", &list![x.clone(), y.clone()])
+            .unwrap()
+    }
     /// term_list support
     /// always return sparse term_list, as [sparse, [term]], not [sparse, term], use contents(head(tl)) to get first term
     pub fn first_term(&self, t: &List) -> List {
@@ -615,6 +619,8 @@ pub fn install_integer_package(arith: &ArithmeticContext) -> Option<List> {
             Some(x)
         })
     });
+    // gcd integer
+    install_binary_op::<i32>("gcd", "integer", move |a, b| a.gcd(&b).to_listv(), arith);
     Some("done".to_string().to_listv())
 }
 pub fn install_float_package(arith: &ArithmeticContext) -> Option<List> {
@@ -1619,6 +1625,30 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             arith.adjoin_term(&first_term, &negative_terms(&arith.rest_terms(l), &arith))
         }
     }
+    fn remainder_terms(a: &List, b: &List, arith: &ArithmeticContext) -> List {
+        div_terms(a, b, arith).tail().head()
+    }
+    fn gcd_terms(a: &List, b: &List, arith: &ArithmeticContext) -> List {
+        if is_empty_term_list(b) {
+            a.clone()
+        } else {
+            gcd_terms(b, &remainder_terms(a, b, arith), arith)
+        }
+    }
+    fn gcd_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
+        // integer and poly also can gcd, such as 2 and 2*x^2 + 2
+        if is_same_variable(&variable(p1), &variable(p2)) {
+            make_poly(
+                variable_not_any(p1, p2),
+                gcd_terms(&term_list(p1), &term_list(p2), arith),
+            )
+        } else {
+            panic!(
+                "{} Polys not in same var -- GCD-POLY",
+                list![p1.clone(), p2.clone()]
+            )
+        }
+    }
     fn align_variable(var_x: &List, p2: &List, arith: &ArithmeticContext) -> List {
         // (y, (sparse, term_list)) -> (poly, y, (sparse, term_list))) and now can use as coeff
         let p2 = tag(p2);
@@ -1671,7 +1701,7 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         if is_same_variable(&variable(p1), &variable(p2)) {
             let result = div_terms(&term_list(p1), &term_list(p2), arith);
             list![
-                make_poly(variable_not_any(p1, p2),result.head(),),
+                make_poly(variable_not_any(p1, p2), result.head(),),
                 make_poly(variable_not_any(p1, p2), result.tail().head(),),
             ]
         } else {
@@ -1756,6 +1786,13 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             let (p1, p2) = (args.head(), args.tail().head());
             let result = div_poly(&p1, &p2, &arith);
             Some(list![tag(&result.head()), tag(&result.tail().head())])
+        })
+    });
+    arith.put("gcd", list!["polynomial", "polynomial"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args: &List| {
+            let (p1, p2) = (args.head(), args.tail().head());
+            Some(tag(&gcd_poly(&p1, &p2, &arith)))
         })
     });
     arith.put("is_equal_to_zero", list!["polynomial"], {
