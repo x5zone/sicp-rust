@@ -93,7 +93,7 @@ pub fn apply_generic(op: &List, args: &List, arith: &ArithmeticContext) -> Optio
                 };
                 apply_generic(op, &list![a1, a2], arith)
             } else {
-                println!("coerce {} -> {}??????{}", t1, t2, arith.coercion.borrow());
+                eprintln!("coercion from {} to {} not found", t1, t2);
                 None
             }
         };
@@ -257,6 +257,10 @@ impl ArithmeticContext {
     }
     pub fn gcd(&self, x: &List, y: &List) -> List {
         self.apply_generic(&"gcd", &list![x.clone(), y.clone()])
+            .unwrap()
+    }
+    pub fn pow(&self, x: &List, y: &List) -> List {
+        self.apply_generic(&"pow", &list![x.clone(), y.clone()])
             .unwrap()
     }
     /// term_list support
@@ -621,6 +625,13 @@ pub fn install_integer_package(arith: &ArithmeticContext) -> Option<List> {
     });
     // gcd integer
     install_binary_op::<i32>("gcd", "integer", move |a, b| a.gcd(&b).to_listv(), arith);
+    // pow integer
+    install_binary_op::<i32>(
+        "pow",
+        "integer",
+        move |a, b| a.pow(b as u32).to_listv(),
+        arith,
+    );
     Some("done".to_string().to_listv())
 }
 pub fn install_float_package(arith: &ArithmeticContext) -> Option<List> {
@@ -663,6 +674,8 @@ pub fn install_float_package(arith: &ArithmeticContext) -> Option<List> {
             Some(make_float(x.sqrt(), &arith))
         })
     });
+    // pow float
+    install_binary_op::<f64>("pow", "float", move |a, b| a.powf(b).to_listv(), arith);
     Some("done".to_string().to_listv())
 }
 
@@ -1597,7 +1610,9 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             } else {
                 let new_c = arith.div(&coeff1, &coeff2);
                 let new_o = arith.sub(&order1, &order2);
-
+                if arith.is_equal_to_zero(&new_c) == true.to_listv() {
+                    eprintln!("first term coeff should not be 0, div_terms may infinite loop");
+                }
                 let first_term = make_terms_from_sparse(&list![make_term(new_o, new_c)], arith);
                 let dividend = add_terms(
                     l1,
@@ -1625,15 +1640,101 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             arith.adjoin_term(&first_term, &negative_terms(&arith.rest_terms(l), &arith))
         }
     }
-    fn remainder_terms(a: &List, b: &List, arith: &ArithmeticContext) -> List {
+    fn integerizing_factor(t1: &List, t2: &List, arith: &ArithmeticContext) -> List {
+        let order1 = order(&pure_first_term(&t1));
+        let (order2, coeff2) = (order(&pure_first_term(&t2)), coeff(&pure_first_term(&t2)));
+
+        let exp = arith.sub(&arith.add(&1.to_listv(), &order1), &order2);
+        assert_eq!(
+            type_tag(&exp),
+            "integer".to_listv(),
+            "integerizing_factor: exp should be integer"
+        );
+        let exp = if *exp.try_as_basis_value::<i32>().unwrap() < 0 {
+            //arith.abs(&exp)
+            0.to_listv()
+        } else {
+            exp
+        };
+        let factor = arith.pow(&coeff2, &exp);
+
+        if type_tag(&factor) == "sparse".to_listv() || type_tag(&factor) == "dense".to_listv() {
+            factor
+        } else {
+            make_terms_from_sparse(&list![make_term(0.to_listv(), factor)], arith)
+        }
+    }
+    fn pseudoremainder_terms(p: &List, q: &List, arith: &ArithmeticContext) -> List {
+        let (t1, t2) = (arith.first_term(&p), arith.first_term(&q));
+        let factor = integerizing_factor(&t1, &t2, arith);
+
+        // factor & p all are terms
+        div_terms(&mul_terms(&factor, &p, arith), q, arith)
+            .tail()
+            .head()
+    }
+    fn _remainder_terms(a: &List, b: &List, arith: &ArithmeticContext) -> List {
         div_terms(a, b, arith).tail().head()
     }
     fn gcd_terms(a: &List, b: &List, arith: &ArithmeticContext) -> List {
         if is_empty_term_list(b) {
             a.clone()
         } else {
-            gcd_terms(b, &remainder_terms(a, b, arith), arith)
+            //let result = gcd_terms(b, &remainder_terms(a, b, arith), arith);
+            let result = gcd_terms(b, &pseudoremainder_terms(a, b, arith), arith);
+
+            // 计算最简 GCD
+            let simplified_gcd = simplify_terms_coeffs(&result, arith);
+            // 计算 poly1 和 poly2 的所有系数的 GCD
+            let coeff_gcd1 = term_list_coeffs_gcd(a, arith);
+            let coeff_gcd2 = term_list_coeffs_gcd(b, arith);
+            let coeff_gcd = arith.gcd(&coeff_gcd1, &coeff_gcd2);
+            // simplify(gcd(2, 2x^2)) = 1; simplify从答案的所有系数中清除公因子，所以需要再乘回系数gcd
+            // 将系数 GCD 乘回最简 GCD
+            let coeff_gcd_term =
+                make_terms_from_sparse(&list![make_term(0.to_listv(), coeff_gcd)], arith);
+            let final_gcd = mul_terms(&simplified_gcd, &coeff_gcd_term, arith);
+            final_gcd
         }
+    }
+    fn term_list_coeffs_gcd(term_list: &List, arith: &ArithmeticContext) -> List {
+        // 找到 term_list 的 GCD
+        if is_empty_term_list(term_list) {
+            return 1.to_listv();
+        }
+
+        fn iter(first: &List, term_list: &List, arith: &ArithmeticContext) -> List {
+            if is_empty_term_list(term_list) {
+                return first.clone();
+            }
+
+            let coeff2: List = coeff(&pure_first_term(&arith.first_term(term_list)));
+            let gcd = if arith.is_equal_to_zero(&coeff2) == true.to_listv() {
+                first.clone()
+            } else {
+                arith.gcd(&first, &coeff2)
+            };
+            iter(&gcd, &arith.rest_terms(term_list), arith)
+        }
+        let first_gcd = coeff(&pure_first_term(&arith.first_term(term_list)));
+        iter(&first_gcd, term_list, arith)
+    }
+
+    fn normalize_terms_coeffs(term_list: &List, gcd: List, arith: &ArithmeticContext) -> List {
+        // 将 term_list 的每个 coeff 除以 gcd
+        let gcd_term = make_terms_from_sparse(&list![make_term(0.to_listv(), gcd)], arith);
+        let res = div_terms(term_list, &gcd_term, arith);
+
+        assert!(
+            is_empty_term_list(&res.tail().head()),
+            "normalize_terms_coeffs: div_terms by gcd remainder should be 0"
+        );
+        res.head()
+    }
+
+    fn simplify_terms_coeffs(term_list: &List, arith: &ArithmeticContext) -> List {
+        let gcd = term_list_coeffs_gcd(term_list, &arith);
+        normalize_terms_coeffs(term_list, gcd, &arith)
     }
     fn gcd_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
         // integer and poly also can gcd, such as 2 and 2*x^2 + 2
