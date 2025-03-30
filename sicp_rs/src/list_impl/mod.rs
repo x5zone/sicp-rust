@@ -315,7 +315,6 @@ impl List {
                 );
                 fun(self, initial)
             }
-            
         }
     }
     pub fn filter<F>(&self, fun: F) -> List
@@ -369,7 +368,7 @@ impl List {
                     &List::extract_clone(next),
                 ),
                 List::V(_) => {
-                   // unreachable_with_location("Flod_left only accept list", &rest)},
+                    // unreachable_with_location("Flod_left only accept list", &rest)},
                     eprintln!(
                         "Warning: fold_left only accepts list, not value. May caused by pair construct not ending with Nil."
                     );
@@ -399,8 +398,7 @@ impl List {
                 panic!(
                     "Error: accumulate_n only accepts list, not value. May caused by pair construct not ending with Nil."
                 );
-            },
-          
+            }
         }
     }
     fn reverse_with<F: Fn(&List) -> List>(&self, fun: F) -> Self {
@@ -534,7 +532,19 @@ impl PartialEq for List {
         }
     }
 }
-
+impl PartialOrd for List {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (List::Nil, List::Nil) => Some(std::cmp::Ordering::Equal),
+            (List::Cons(x1, x2), List::Cons(y1, y2)) => match x1.partial_cmp(y1) {
+                Some(std::cmp::Ordering::Equal) => x2.partial_cmp(y2),
+                ord => ord,
+            },
+            (List::V(x1), List::V(y1)) => x1.as_ref().partial_cmp(y1.as_ref()),
+            _ => None,
+        }
+    }
+}
 /// Macro for creating a list from values.
 /// 用于从多个值创建链表的宏。
 #[macro_export]

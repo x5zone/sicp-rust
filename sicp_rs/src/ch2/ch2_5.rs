@@ -259,6 +259,10 @@ impl ArithmeticContext {
         self.apply_generic(&"gcd", &list![x.clone(), y.clone()])
             .unwrap()
     }
+    pub fn reduce(&self, x: &List, y: &List) -> List {
+        self.apply_generic(&"reduce", &list![x.clone(), y.clone()])
+            .unwrap()
+    }
     pub fn pow(&self, x: &List, y: &List) -> List {
         self.apply_generic(&"pow", &list![x.clone(), y.clone()])
             .unwrap()
@@ -632,6 +636,13 @@ pub fn install_integer_package(arith: &ArithmeticContext) -> Option<List> {
         move |a, b| a.pow(b as u32).to_listv(),
         arith,
     );
+    // reduce integer
+    install_binary_op::<i32>(
+        "reduce",
+        "integer",
+        move |a, b| list![a / (a.gcd(&b)), b / (a.gcd(&b))],
+        arith,
+    );
     Some("done".to_string().to_listv())
 }
 pub fn install_float_package(arith: &ArithmeticContext) -> Option<List> {
@@ -694,18 +705,15 @@ pub fn install_rational_package(arith: &ArithmeticContext) -> Option<List> {
                 panic!("make rational: zero denominator");
             }
 
-            if type_tag(&n) == "integer".to_listv() && type_tag(&d) == "integer".to_listv() {
-                let (n, d) = (
-                    n.try_as_basis_value::<i32>()
-                        .expect("make rational with integer error"),
-                    d.try_as_basis_value::<i32>()
-                        .expect("make rational with integer error"),
-                );
-                let g = (*n).gcd(d);
-                Some(tag(pair!(n / g, d / g)))
-            } else {
-                // may be complex or polynomial
-                Some(tag(pair!(n.clone(), d.clone())))
+            let (n_tag, d_tag) = (type_tag(&n).to_string(), type_tag(&d).to_string());
+            match (&n_tag[..], &d_tag[..]) {
+                ("integer", "integer") | ("polynomial", "polynomial") => {
+                    let res = arith.reduce(&n, &d);
+                    let (n, d) = (res.head(), res.tail().head());
+                    Some(tag(pair!(n, d)))
+                }
+                // complex
+                _ => Some(tag(pair!(n.clone(), d.clone()))),
             }
         })
     });
@@ -1650,7 +1658,7 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             "integer".to_listv(),
             "integerizing_factor: exp should be integer"
         );
-        let exp = if *exp.try_as_basis_value::<i32>().unwrap() < 0 {
+        let exp = if exp < 0.to_listv() {
             //arith.abs(&exp)
             0.to_listv()
         } else {
@@ -1694,6 +1702,13 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
             let coeff_gcd_term =
                 make_terms_from_sparse(&list![make_term(0.to_listv(), coeff_gcd)], arith);
             let final_gcd = mul_terms(&simplified_gcd, &coeff_gcd_term, arith);
+
+            let final_first_coeff = coeff(&pure_first_term(&arith.first_term(&final_gcd)));
+            let final_gcd = if final_first_coeff < 0.to_listv() {
+                negative_terms(&final_gcd, arith)
+            } else {
+                final_gcd
+            };
             final_gcd
         }
     }
@@ -1735,6 +1750,26 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
     fn simplify_terms_coeffs(term_list: &List, arith: &ArithmeticContext) -> List {
         let gcd = term_list_coeffs_gcd(term_list, &arith);
         normalize_terms_coeffs(term_list, gcd, &arith)
+    }
+    fn reduce_terms(n: &List, d: &List, arith: &ArithmeticContext) -> (List, List) {
+        let g = gcd_terms(n, d, arith);
+        let (nn, dd) = (
+            div_terms(n, &g, arith).head(),
+            div_terms(d, &g, arith).head(),
+        );
+        (nn, dd)
+    }
+    fn reduce_poly(n: &List, d: &List, arith: &ArithmeticContext) -> (List, List) {
+        if is_same_variable(&variable(n), &variable(d)) {
+            let (nn, dd) = reduce_terms(&term_list(n), &term_list(d), arith);
+            let var_tag = variable_not_any(n, d);
+            (make_poly(var_tag.clone(), nn), make_poly(var_tag, dd))
+        } else {
+            panic!(
+                "{} Polys not in same var -- REDUCE-POLY",
+                list![n.clone(), d.clone()]
+            )
+        }
     }
     fn gcd_poly(p1: &List, p2: &List, arith: &ArithmeticContext) -> List {
         // integer and poly also can gcd, such as 2 and 2*x^2 + 2
@@ -1894,6 +1929,14 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         ClosureWrapper::new(move |args: &List| {
             let (p1, p2) = (args.head(), args.tail().head());
             Some(tag(&gcd_poly(&p1, &p2, &arith)))
+        })
+    });
+    arith.put("reduce", list!["polynomial", "polynomial"], {
+        let arith = arith.clone();
+        ClosureWrapper::new(move |args: &List| {
+            let (p1, p2) = (args.head(), args.tail().head());
+            let (p1, p2) = reduce_poly(&p1, &p2, &arith);
+            Some(list![tag(&p1), tag(&p2)])
         })
     });
     arith.put("is_equal_to_zero", list!["polynomial"], {
