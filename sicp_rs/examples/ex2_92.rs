@@ -181,36 +181,73 @@ fn main() {
     let rational2 = make_rational(numerator2.clone(), denominator2.clone(), &arith);
 
     println!("Rational Function 1:");
-    println!("  Numerator: {}", pretty_polynomial(&arith.numer(&rational1), &arith));
-    println!("  Denominator: {}", pretty_polynomial(&arith.denom(&rational1), &arith));
+    println!(
+        "  Numerator: {}",
+        pretty_polynomial(&arith.numer(&rational1), &arith)
+    );
+    println!(
+        "  Denominator: {}",
+        pretty_polynomial(&arith.denom(&rational1), &arith)
+    );
 
     println!("Rational Function 2:");
-    println!("  Numerator: {}", pretty_polynomial(&arith.numer(&rational2), &arith));
-    println!("  Denominator: {}", pretty_polynomial(&arith.denom(&rational2), &arith));
+    println!(
+        "  Numerator: {}",
+        pretty_polynomial(&arith.numer(&rational2), &arith)
+    );
+    println!(
+        "  Denominator: {}",
+        pretty_polynomial(&arith.denom(&rational2), &arith)
+    );
 
     // 有理函数加法
-    let rational_add = arith.add(&rational1, &rational2);
+    // let rational_add = arith.add(&rational1, &rational2);
     println!("Rational Addition Result:");
     println!(
         "  Numerator: {}",
-        pretty_polynomial(&arith.numer(&rational_add), &arith)
+        pretty_polynomial(
+            &arith.add(
+                &arith.mul(&arith.numer(&rational1), &arith.denom(&rational2)),
+                &arith.mul(&arith.numer(&rational2), &arith.denom(&rational1))
+            ),
+            &arith
+        )
     );
     println!(
         "  Denominator: {}",
-        pretty_polynomial(&arith.denom(&rational_add), &arith)
+        pretty_polynomial(
+            &arith.mul(&arith.denom(&rational1), &arith.denom(&rational2)),
+            &arith
+        )
     );
+    // println!(
+    //     "  Numerator: {}",
+    //     pretty_polynomial(&arith.numer(&rational_add), &arith)
+    // );
+    // println!(
+    //     "  Denominator: {}",
+    //     pretty_polynomial(&arith.denom(&rational_add), &arith)
+    // );
 
     // 有理函数乘法
-    let rational_mul = arith.mul(&rational1, &rational2);
+    //let rational_mul = arith.mul(&rational1, &rational2);
     println!("Rational Multiplication Result:");
-    println!(
+        println!(
         "  Numerator: {}",
-        pretty_polynomial(&arith.numer(&rational_mul), &arith)
+        pretty_polynomial(&arith.mul(&arith.numer(&rational1), &arith.numer(&rational2)), &arith)
     );
     println!(
         "  Denominator: {}",
-        pretty_polynomial(&arith.denom(&rational_mul), &arith)
+        pretty_polynomial(&arith.mul(&arith.denom(&rational1), &arith.denom(&rational2)), &arith)
     );
+    // println!(
+    //     "  Numerator: {}",
+    //     pretty_polynomial(&arith.numer(&rational_mul), &arith)
+    // );
+    // println!(
+    //     "  Denominator: {}",
+    //     pretty_polynomial(&arith.denom(&rational_mul), &arith)
+    // );
 
     println!("\n==== All Tests Completed Successfully ====");
 }

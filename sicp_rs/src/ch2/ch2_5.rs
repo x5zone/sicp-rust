@@ -1675,7 +1675,6 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
     fn pseudoremainder_terms(p: &List, q: &List, arith: &ArithmeticContext) -> List {
         let (t1, t2) = (arith.first_term(&p), arith.first_term(&q));
         let factor = integerizing_factor(&t1, &t2, arith);
-
         // factor & p all are terms
         div_terms(&mul_terms(&factor, &p, arith), q, arith)
             .tail()
@@ -1690,7 +1689,6 @@ pub fn install_polynomial_package(arith: &ArithmeticContext) -> Option<List> {
         } else {
             //let result = gcd_terms(b, &remainder_terms(a, b, arith), arith);
             let result = gcd_terms(b, &pseudoremainder_terms(a, b, arith), arith);
-
             // 计算最简 GCD
             let simplified_gcd = simplify_terms_coeffs(&result, arith);
             // 计算 poly1 和 poly2 的所有系数的 GCD
