@@ -1,15 +1,12 @@
-use std::{cell::RefCell, rc::Rc};
-
-fn make_accumulator(init: i32) -> impl Fn(i32) -> i32 {
-    let sum = Rc::new(RefCell::new(init));
+fn make_accumulator(init: i32) -> impl FnMut(i32) -> i32 {
+    let mut sum = init;
     move |x| {
-        let mut s = sum.borrow_mut();
-        *s += x;
-        *s
+        sum += x;
+        sum
     }
 }
 fn main() {
-    let a = make_accumulator(5);
+    let mut a = make_accumulator(5);
     println!("{}", a(10));
     println!("{}", a(10));
 }

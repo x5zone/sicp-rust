@@ -37,7 +37,6 @@ fn make_account(balance: i32, passwd: String) -> impl Fn(&str, &str) -> List {
             }
 
             match m {
-                // dispatch可能被调用多次，每次均消耗withdraw，故withdraw需要Rc包裹
                 "withdraw" => ClosureWrapper::new({
                     let withdraw = withdraw.clone();
                     move |x| Some(withdraw(x).to_listv())
@@ -55,6 +54,34 @@ fn make_account(balance: i32, passwd: String) -> impl Fn(&str, &str) -> List {
     dispatch
 }
 
+fn make_joint(
+    acc: &impl Fn(&str, &str) -> List,
+    old_passwd: String,
+    new_passwd: String,
+) -> impl Fn(&str, &str) -> List {
+    fn acc_closure(acc: &impl Fn(&str, &str) -> List, passwd: &str, cmd: &str) -> ClosureWrapper {
+        acc(passwd, cmd)
+            .try_as_basis_value::<ClosureWrapper>()
+            .expect("Wrong linked account password")
+            .clone()
+    }
+    let with_draw = acc_closure(acc, old_passwd.as_str(), "withdraw");
+    let deposit = acc_closure(acc, old_passwd.as_str(), "deposit");
+
+    let dispatch = {
+        move |pass: &str, m: &str| {
+            if pass != new_passwd.as_str() {
+                return "Wrong joint account password".to_listv();
+            }
+            match m {
+                "withdraw" => with_draw.clone().to_listv(),
+                "deposit" => deposit.clone().to_listv(),
+                _ => "Unknown request -- MAKE-ACCOUNT".to_listv(),
+            }
+        }
+    };
+    dispatch
+}
 fn handle_response(response: List, x: i32) -> List {
     response.try_as_basis_value::<ClosureWrapper>().map_or_else(
         |_| response.clone(),                           // 如果不是闭包，直接返回原值
@@ -62,21 +89,17 @@ fn handle_response(response: List, x: i32) -> List {
     )
 }
 fn main() {
-    let acc = make_account(100, "secret password".to_string());
+    let peter_acc = make_account(200, "open sesame".to_string());
+    let paul_acc = make_joint(&peter_acc, "open sesame".to_string(), "rosebud".to_string());
     println!(
         "{}",
-        handle_response(acc("secret password", "withdraw"), 40)
+        handle_response(peter_acc("open sesame", "withdraw"), 100)
     );
+    println!("{}", handle_response(paul_acc("rosebud", "withdraw"), 100));
+    println!("{}", handle_response(paul_acc("rosebud", "deposit"), 10));
     println!(
         "{}",
-        handle_response(acc("secret password", "withdraw"), 40)
+        handle_response(paul_acc("open sesame", "withdraw"), 5)
     );
-    println!(
-        "{}",
-        handle_response(acc("some other password", "withdraw"), 40)
-    );
-    println!(
-        "{}",
-        handle_response(acc("secret password", "withdraw"), 40)
-    );
+    println!("{}", handle_response(paul_acc("rosebud", "withdraw"), 20));
 }

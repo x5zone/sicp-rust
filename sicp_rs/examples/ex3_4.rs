@@ -6,10 +6,9 @@ fn extract_value(x: &List) -> i32 {
         .expect("Expected an i32 value")
         .clone()
 }
-fn make_account(balance: i32, passwd: String) -> impl Fn(&str, &str) -> List {
+fn make_account(balance: i32, passwd: String) -> impl FnMut(&str, &str) -> List {
     let balance = Rc::new(RefCell::new(balance));
-    let passwd = Rc::new(passwd);
-    let pass_err_cnt = Rc::new(RefCell::new(0));
+    let mut cnt = 0;
 
     let withdraw = {
         let balance = balance.clone();
@@ -32,19 +31,16 @@ fn make_account(balance: i32, passwd: String) -> impl Fn(&str, &str) -> List {
             (*b).to_listv()
         })
     };
-    let handle_incorrect_password = {
-        let pass_err_cnt = pass_err_cnt.clone();
+    let mut handle_incorrect_password = {
         move || {
-            let mut cnt = pass_err_cnt.borrow_mut();
-            *cnt += 1;
-            if *cnt >= 7 {
+            cnt += 1;
+            if cnt >= 7 {
                 return "Call the cops".to_listv();
             }
             "Incorrect password".to_listv()
         }
     };
     let dispatch = {
-        let passwd = passwd.clone();
         move |pass: &str, m: &str| {
             if pass != passwd.as_str() {
                 return handle_incorrect_password();
@@ -75,7 +71,7 @@ fn handle_response(response: List, x: i32) -> List {
     )
 }
 fn main() {
-    let acc = Rc::new(make_account(100, "secret password".to_string()));
+    let mut acc = make_account(100, "secret password".to_string());
     println!(
         "{}",
         handle_response(acc("secret password", "withdraw"), 40)

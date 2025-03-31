@@ -1,5 +1,3 @@
-use std::{cell::RefCell, rc::Rc};
-
 use sicp_rs::prelude::*;
 fn math_sqrt(x: List) -> List {
     x.try_as_basis_value::<f64>()
@@ -7,21 +5,20 @@ fn math_sqrt(x: List) -> List {
         .sqrt()
         .to_listv()
 }
-fn make_monitored(f: impl Fn(List) -> List) -> impl Fn(List) -> List {
-    let count = Rc::new(RefCell::new(0));
+fn make_monitored(f: impl Fn(List) -> List) -> impl FnMut(List) -> List {
+    let mut count = 0;
     move |x| {
-        let mut c = count.borrow_mut();
         if x == "how-many-calls?".to_listv() {
-            c.to_owned().to_listv()
+            count.to_listv()
         } else {
-            *c += 1;
+            count += 1;
             f(x)
         }
     }
 }
 fn main() {
-    let sqrt = make_monitored(math_sqrt);
-    println!("{}", sqrt("how-many-calls?".to_listv()));   // 0.0
-    println!("{}", sqrt(100.0.to_listv()));               // 10.0
-    println!("{}", sqrt("how-many-calls?".to_listv()));   // 1.0
+    let mut sqrt = make_monitored(math_sqrt);
+    println!("{}", sqrt("how-many-calls?".to_listv())); // 0
+    println!("{}", sqrt(100.0.to_listv())); // 10.0
+    println!("{}", sqrt("how-many-calls?".to_listv())); // 1
 }
