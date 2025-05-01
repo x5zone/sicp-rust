@@ -21,10 +21,11 @@ fn has_cycle(x: List) -> bool {
                 // 若head也是pair，尝试遍历并查看是否会构成环路。
                 // 为避免误判共享子结构，构建新的visited，并从此节点开始，若能重新回到该节点，即为有环。
                 a.head().is_pair() && {
-                let mut new_visited = HashSet::new();
-                new_visited.insert(a.unique_id());
-                iter(a.head(), &mut new_visited)
-            }) || (a.tail().is_pair() && iter(a.tail(), visited))
+                    let mut new_visited = HashSet::new();
+                    new_visited.insert(a.unique_id());
+                    iter(a.head(), &mut new_visited)
+                }
+            ) || (a.tail().is_pair() && iter(a.tail(), visited))
             // 习题其实仅考察单链表，以下即为习题预期解答。
             // iter(a.tail(), visited)
         } else {

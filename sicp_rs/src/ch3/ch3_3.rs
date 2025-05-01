@@ -29,18 +29,18 @@ pub fn delete_queue(queue: &List) -> List {
         queue.clone()
     }
 }
-fn front_ptr(queue: &List) -> List {
+pub fn front_ptr(queue: &List) -> List {
     queue.head()
 }
-fn rear_ptr(queue: &List) -> List {
+pub fn rear_ptr(queue: &List) -> List {
     queue.tail()
 }
 fn set_front_ptr(queue: &List, item: List) -> List {
-    queue.set_tail(item);
+    queue.set_head(item);
     queue.clone()
 }
 fn set_rear_ptr(queue: &List, item: List) -> List {
-    queue.set_head(item);
+    queue.set_tail(item);
     queue.clone()
 }
 pub fn front_queue(queue: &List) -> List {
