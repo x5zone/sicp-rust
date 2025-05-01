@@ -94,6 +94,33 @@ impl Clone for List {
 }
 
 impl List {
+    /// 获取 `List` 的唯一标识符。
+    /// Get the unique identifier for the `List`.
+    ///
+    /// 对于 `Cons` 和 `V` 变体，返回其内部共享指针的地址。
+    /// For `Cons` and `V` variants, return the address of their internal shared pointer.
+    ///
+    /// 对于 `Nil` 变体，直接返回其自身的地址。
+    /// For the `Nil` variant, directly return its own address.
+    pub fn unique_id(&self) -> u64 {
+        match self {
+            // 提取 `SharedList` 的指针地址
+            // Extract the pointer address of `SharedList`
+            List::Cons(a, b) => {
+                let a = Rc::as_ptr(a) as u64;
+                let b = Rc::as_ptr(b) as u64;
+                a.wrapping_mul(31).wrapping_add(b)
+            }
+
+            // 提取 `Rc<dyn ListV>` 的指针地址
+            // Extract the pointer address of `Rc<dyn ListV>`
+            List::V(v) => Rc::as_ptr(v) as *const () as u64,
+
+            // 对于 `Nil`，直接返回其自身的地址
+            // For `Nil`, directly return its own address
+            List::Nil => self as *const _ as u64,
+        }
+    }
     /// Extract an immutable reference from a `SharedList`.
     /// 从 `SharedList` 中提取不可变引用。
     pub fn extract_clone(sl: &SharedList) -> List {
